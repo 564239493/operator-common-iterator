@@ -1,0 +1,6 @@
+代码覆盖统计模块 — 预留
+
+后续需在此目录下实现：
+- 代码插桩（coverage.py / pytest-cov）
+- 行/分支/函数覆盖率统计
+- 与 modeling_coverage 的联合分析

@@ -1,0 +1,267 @@
+{
+  "comment": "Layer 2 Shape Modeling: V3.0 - Optimized for Ascend 131 Fusion Ops (MoE, Swin, NSA, MLA)",
+  "pools": {
+    "power_of_2": [
+      16,
+      32,
+      64,
+      128,
+      256,
+      512,
+      1024,
+      2048,
+      4096
+    ],
+    "llm_hidden": [
+      768,
+      1024,
+      1536,
+      2048,
+      4096
+    ],
+    "llm_heads": [
+      32,
+      40,
+      64,
+      80,
+      96,
+      128
+    ],
+    "kv_heads": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "moe_experts": [
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "odd_alignments": [
+      3,
+      7,
+      9,
+      15,
+      17,
+      33,
+      65,
+      127,
+      129,
+      255,
+      257,
+      1011,
+      1023,
+      1025,
+      4095,
+      4097
+    ],
+    "small_integers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      8
+    ],
+    "window_sizes": [
+      7,
+      14,
+      16,
+      32
+    ],
+    "vocab_size": [
+      32000,
+      50257,
+      100000,
+      150000
+    ],
+    "long_seq": [
+      2048,
+      4096,
+      8192,
+      16384,
+      32768
+    ],
+    "block_sizes": [
+      16,
+      32,
+      64,
+      128
+    ],
+    "default": [
+      16,
+      32,
+      64
+    ],
+    "high_dimensional_shape": [
+      1,
+      2,
+      4
+    ],
+    "small_shape_value": [
+      1,
+      2,
+      4,
+      8,
+      16
+    ]
+  },
+  "strategies": {
+    "Typical": {
+      "default_pool": "power_of_2",
+      "param_overrides": {
+        "antiquant_offset": "small_integers",
+        "antiquant_scale": "small_integers",
+        "num_directions": "small_integers"
+      },
+      "role_rules": [
+        {
+          "keywords": [
+            "weight",
+            "kernel",
+            "filter"
+          ],
+          "pool": "power_of_2",
+          "desc": "权重矩阵"
+        },
+        {
+          "keywords": [
+            "bias",
+            "gamma",
+            "beta",
+            "mean",
+            "var",
+            "scale",
+            "offset"
+          ],
+          "pool": "llm_hidden",
+          "desc": "Scale/Bias/Norm参数"
+        },
+        {
+          "keywords": [
+            "expert",
+            "num_experts",
+            "capacity",
+            "num_rows"
+          ],
+          "pool": "moe_experts",
+          "desc": "MoE 专家数与容量"
+        },
+        {
+          "keywords": [
+            "topk",
+            "k"
+          ],
+          "pool": "small_integers",
+          "desc": "MoE Gating 的 TopK"
+        },
+        {
+          "keywords": [
+            "window",
+            "shift_size"
+          ],
+          "pool": "window_sizes",
+          "desc": "Swin Transformer 窗口参数"
+        },
+        {
+          "keywords": [
+            "block_size",
+            "block_dim",
+            "sparse_block"
+          ],
+          "pool": "block_sizes",
+          "desc": "NSA 稀疏注意力块大小"
+        },
+        {
+          "keywords": [
+            "kv_head",
+            "n_kv_head",
+            "num_key_value_heads"
+          ],
+          "pool": "kv_heads",
+          "desc": "GQA/MQA KV 头数"
+        },
+        {
+          "keywords": [
+            "head",
+            "num_heads",
+            "slope"
+          ],
+          "pool": "llm_heads",
+          "desc": "Attention 头数"
+        },
+        {
+          "keywords": [
+            "seq_len",
+            "seqlens",
+            "seq_length"
+          ],
+          "pool": "long_seq",
+          "desc": "长序列长度"
+        },
+        {
+          "keywords": [
+            "vocab",
+            "embedding"
+          ],
+          "pool": "vocab_size",
+          "desc": "词表大小"
+        },
+        {
+          "keywords": [
+            "cos",
+            "sin",
+            "rotary",
+            "pe_dim"
+          ],
+          "pool": "llm_heads",
+          "desc": "RoPE/MLA 位置编码维度"
+        },
+        {
+          "keywords": [
+            "x",
+            "y",
+            "self",
+            "input",
+            "query",
+            "key",
+            "value",
+            "grad",
+            "out",
+            "hidden",
+            "lora",
+            "prolog"
+          ],
+          "pool": "llm_hidden",
+          "desc": "主张量维度"
+        },
+        {
+          "keywords": [
+            "dim",
+            "axis",
+            "keepdim",
+            "stride",
+            "dilation",
+            "layers",
+            "direction"
+          ],
+          "pool": "small_integers",
+          "desc": "控制参数"
+        }
+      ]
+    },
+    "Has_Odd_Size": {
+      "default_pool": "odd_alignments"
+    },
+    "Has_Size_1": {
+      "base_pool": "power_of_2"
+    },
+    "Has_Large_Size": {
+      "base_pool": "power_of_2",
+      "fixed_large_dim": 65534
+    }
+  }
+}

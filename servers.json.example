@@ -1,0 +1,50 @@
+{
+  "_comment": "ATK 远程执行服务器配置。支持多台服务器，按平台名匹配。密码是明文（内网环境）。",
+
+  "servers": [
+    {
+      "name": "Atlas A3 开发机",
+      "ip": "192.168.1.100",
+      "port": 22,
+      "username": "operator_atk",
+      "password": "your_password_here",
+      "platforms": [
+        "Atlas A3 训练系列产品/Atlas A3 推理系列产品"
+      ],
+      "env_init_script": "/usr/local/Ascend/ascend-toolkit/set_env.sh"
+    },
+    {
+      "name": "Atlas A2 开发机",
+      "ip": "192.168.1.101",
+      "port": 22,
+      "username": "operator_atk",
+      "password": "your_password_here",
+      "platforms": [
+        "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+        "Atlas 200I/500 A2 推理产品"
+      ],
+      "env_init_script": "/usr/local/Ascend/ascend-toolkit/set_env.sh"
+    },
+    {
+      "name": "Atlas 350 开发机",
+      "ip": "192.168.1.102",
+      "port": 22,
+      "username": "operator_atk",
+      "password": "your_password_here",
+      "platforms": [
+        "Atlas 350 加速卡"
+      ],
+      "env_init_script": "/usr/local/Ascend/ascend-toolkit/set_env.sh"
+    }
+  ],
+
+  "_fields": {
+    "name": "服务器名称（用于日志）",
+    "ip": "服务器 IP 地址",
+    "port": "SSH 端口（默认 22）",
+    "username": "SSH 用户名",
+    "password": "SSH 密码",
+    "platforms": "该服务器支持的昇腾平台列表（匹配 product_support）",
+    "env_init_script": "CANN 环境初始化脚本路径（可选，默认 /usr/local/Ascend/ascend-toolkit/set_env.sh）"
+  }
+}

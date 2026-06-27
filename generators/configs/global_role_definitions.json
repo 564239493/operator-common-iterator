@@ -1,0 +1,237 @@
+{
+  "__Description__": "defines the mapping from role names to data generation schemes.",
+  "__ROLE_ONTOLOGY_DOC__": [
+    "非功能性注释,对参数划分为10类。",
+    "role_data_generic",
+    "role_data_positive_only",
+    "role_scale_param",
+    "role_bias_param",
+    "role_index_tensor",
+    "role_quant_scale",
+    "role_quant_offset",
+    "role_epsilon_float",
+    "role_shape_attribute",
+    "role_unclassified"
+  ],
+    "__GENERATOR_RULES_LEGEND__": {
+    "__comment__": "非功能性的注释，解释生成器 (data_profile_logic.py) 所支持的 'type' 字段，即数据生成策略。",
+    "Static": "生成一个静态的常量值。需要 `value` 参数 (例如: 0.0, 'NaN', 'Infinity')。",
+    "Normal": "从正态 (高斯) 分布中采样。需要 `mean` (均值) 和 `std` (标准差) 参数。",
+    "Uniform": "从均匀分布 (浮点数) 中采样。需要 `min` (最小值) 和 `max` (最大值) 参数。",
+    "LogUniform": "从对数均匀分布中采样 (在数量级上均匀，用于压力测试)。需要 `min` 和 `max` 参数。",
+    "IntUniform": "从均匀分布 (整数) 中采样。需要 `min` 和 `max` 参数。",
+    "IntUniformOdd": "从均匀分布中仅采样“奇数”整数 (用于测试内存对齐)。需要 `min` 和 `max` 参数。",
+    "Choice": "从一个给定的 `options` 列表 (数组) 中随机选择一个值。"
+  },
+
+  "role_data_generic": {
+    "Typical": [
+      {"type": "Normal", "mean": 0, "std": 1, "weight": 0.50, "comment": "标准正态分布 (最常见的通用数据分布)"},
+      {"type": "Uniform", "min": -10, "max": 10, "weight": 0.30, "comment": "小范围均匀分布覆盖"},
+      {"type": "Normal", "mean": 0, "std": 5, "weight": 0.20, "comment": "宽标准差正态 (模拟方差较大的激活值)"}
+    ],
+    "PosNormal": [
+      {"type": "Normal", "mean": 5, "std": 2, "post_process": "abs_clip_min", "clip_min": 0.01, "weight": 0.33},
+      {"type": "LogUniform", "min": 0.01, "max": 100, "weight": 0.33},
+      {"type": "Normal", "mean": 0, "std": 1.5, "post_process": "abs_clip_min", "clip_min": 0.01, "weight": 0.34, "comment": "测试 '零均值' 数据 (例如来自LayerNorm后的 ReLU)"}
+    ],
+    "NegNormal": [
+      {"type": "Normal", "mean": -5, "std": 2, "post_process": "clip_max", "clip_max": -0.01, "weight": 0.33},
+      {"type": "LogUniform", "min": -100, "max": -0.01, "weight": 0.33},
+      { "type": "Normal", "mean": 0, "std": 1.5, "post_process": "clip_max", "clip_max": -0.01,  "weight": 0.34, "comment": "测试 '零均值' 数据 (例如来自Normalization后的Sigmoid/Tanh的负半轴)"}
+    ],
+    "Zero": [{"type": "Static", "value": 0.0, "weight": 1.0}],
+    "One": [{"type": "Static", "value": 1.0, "weight": 1.0}],
+    "NaN": [{"type": "Static", "value": "nan", "weight": 1.0}],
+    "PosInf": [{"type": "Static", "value": "inf", "weight": 1.0}],
+    "NegInf": [{"type": "Static", "value": "-inf", "weight": 1.0}],
+    "SubNormal": [{"type": "Static", "value": 1.23e-40, "weight": 1.0}],
+    "Pos": [
+      {"type": "Normal", "mean": 10, "std": 5, "post_process": "abs_clip_min", "clip_min": 1, "weight": 0.30, "comment": "模拟量化后的正激活值 (离散化高斯, 截断取整)"},
+      {"type": "IntUniform", "min": 1, "max": 100, "weight": 0.15, "comment": "小正整数均匀覆盖 (高频区间)"},
+      {"type": "IntUniform", "min": 101, "max": 32767, "weight": 0.15, "comment": "中大正整数均匀覆盖"},
+      {"type": "Choice", "options": [1, 2, 4, 8, 16, 32, 64, 128, 256], "weight": 0.20, "comment": "2的幂次 (常见于通道数/batch size等架构参数)"},
+      {"type": "IntUniformOdd", "min": 1, "max": 255, "weight": 0.10, "comment": "奇数正整数 (测试非对齐场景)"},
+      {"type": "Choice", "options": [3, 7, 15, 31, 63, 127, 255], "weight": 0.10, "comment": "2^n-1 边界值 (常见的整数溢出临界点)"}
+    ],
+    "Neg": [
+      {"type": "Normal", "mean": -10, "std": 5, "post_process": "clip_max", "clip_max": -1, "weight": 0.30, "comment": "模拟量化后的负激活值 (离散化高斯, 截断取整)"},
+      {"type": "IntUniform", "min": -100, "max": -1, "weight": 0.15, "comment": "小负整数均匀覆盖 (高频区间)"},
+      {"type": "IntUniform", "min": -32767, "max": -101, "weight": 0.15, "comment": "中大负整数均匀覆盖"},
+      {"type": "Choice", "options": [-1, -2, -4, -8, -16, -32, -64, -128, -256], "weight": 0.20, "comment": "负的2的幂次"},
+      {"type": "IntUniformOdd", "min": -255, "max": -1, "weight": 0.10, "comment": "奇数负整数 (测试非对齐场景)"},
+      {"type": "Choice", "options": [-3, -7, -15, -31, -63, -127, -255], "weight": 0.10, "comment": "-(2^n-1) 边界值"}
+    ],
+    "Max": [{"type": "Static", "value": 2147483647, "weight": 1.0, "comment": "INT32 最大值边界"}],
+    "Min": [{"type": "Static", "value": -2147483648, "weight": 1.0, "comment": "INT32 最小值边界"}]
+  },
+
+  "role_data_positive_only": {
+    "Typical": [
+      {"type": "Normal", "mean": 5, "std": 2, "post_process": "abs_clip_min", "clip_min": 0.01, "weight": 0.50, "comment": "正值高斯分布 (典型正激活值)"},
+      {"type": "LogUniform", "min": 0.01, "max": 100, "weight": 0.30, "comment": "对数均匀覆盖多数量级"},
+      {"type": "Uniform", "min": 0.1, "max": 10, "weight": 0.20, "comment": "小范围正值均匀分布"}
+    ],
+    "PosNormal": [
+      {"type": "Normal", "mean": 5, "std": 2, "post_process": "abs_clip_min", "clip_min": 0.01, "weight": 0.5},
+      {"type": "LogUniform", "min": 0.01, "max": 100, "weight": 0.5}
+    ],
+    "Zero": [
+      {"type": "Static", "value": 1e-6, "weight": 1.0, "comment": "'Zero' 对于 'positive_only' 必须映射到一个极小的正数 (Epsilon)"}
+    ],
+    "NaN": [{"type": "Static", "value": "nan", "weight": 1.0}],
+    "PosInf": [{"type": "Static", "value": "inf", "weight": 1.0}],
+    "Pos": [
+      {"type": "Normal", "mean": 10, "std": 5, "post_process": "abs_clip_min", "clip_min": 1, "weight": 0.35, "comment": "模拟量化后的正激活值 (离散化高斯, 截断取整)"},
+      {"type": "IntUniform", "min": 1, "max": 100, "weight": 0.15, "comment": "小正整数均匀覆盖 (高频区间)"},
+      {"type": "IntUniform", "min": 101, "max": 32767, "weight": 0.15, "comment": "中大正整数均匀覆盖"},
+      {"type": "Choice", "options": [1, 2, 4, 8, 16, 32, 64, 128, 256], "weight": 0.25, "comment": "2的幂次 (常见于通道数等架构参数)"},
+      {"type": "IntUniformOdd", "min": 1, "max": 255, "weight": 0.10, "comment": "奇数正整数 (测试非对齐场景)"}
+    ],
+    "Max": [{"type": "Static", "value": 2147483647, "weight": 1.0, "comment": "INT32 最大值边界"}]
+  },
+
+  "role_scale_param": {
+    "Typical": [{"type": "Uniform", "min": 0.9, "max": 1.1, "weight": 1.0}],
+    "Zero": [{"type": "Static", "value": 0.0, "weight": 1.0, "comment": "关键测试：零尺度"}],
+    "One": [{"type": "Static", "value": 1.0, "weight": 1.0}],
+    "NaN": [{"type": "Static", "value": "nan", "weight": 1.0}],
+    "PosInf": [{"type": "Static", "value": "inf", "weight": 1.0}],
+    "Pos": [
+      {"type": "Choice", "options": [1, 2, 4, 8, 16, 32], "weight": 0.55, "comment": "2的幂次缩放因子 (最常见的scale模式)"},
+      {"type": "IntUniform", "min": 1, "max": 10, "weight": 0.45, "comment": "小正整数缩放因子均匀采样"}
+    ],
+    "Neg": [
+      {"type": "Choice", "options": [-1, -2, -4, -8, -16], "weight": 0.50, "comment": "负的2的幂次 (翻转/镜像场景)"},
+      {"type": "IntUniform", "min": -10, "max": -1, "weight": 0.50, "comment": "小负整数缩放因子均匀采样"}
+    ],
+    "Max": [{"type": "Static", "value": 2147483647, "weight": 1.0, "comment": "INT32 边界最大值"}],
+    "Min": [{"type": "Static", "value": -2147483648, "weight": 1.0, "comment": "INT32 边界最小值"}]
+  },
+
+  "role_bias_param": {
+    "Typical": [{"type": "Normal", "mean": 0, "std": 0.5, "weight": 1.0}],
+    "Zero": [{"type": "Static", "value": 0.0, "weight": 1.0}],
+    "NaN": [{"type": "Static", "value": "nan", "weight": 1.0}],
+    "SubNormal": [{"type": "Static", "value": 1.23e-40, "weight": 1.0}],
+    "Pos": [
+      {"type": "Normal", "mean": 5, "std": 3, "post_process": "abs_clip_min", "clip_min": 1, "weight": 0.40, "comment": "偏置通常服从近零高斯分布 (离散化, 截断取整)"},
+      {"type": "IntUniform", "min": 1, "max": 1000, "weight": 0.35, "comment": "偏置范围均匀覆盖"},
+      {"type": "Choice", "options": [1, 2, 4, 8, 16, 32, 64, 128], "weight": 0.25, "comment": "2的幂次偏置 (常见于量化偏移)"}
+    ],
+    "Neg": [
+      {"type": "Normal", "mean": -5, "std": 3, "post_process": "clip_max", "clip_max": -1, "weight": 0.40, "comment": "负偏置近零高斯分布 (离散化, 截断取整)"},
+      {"type": "IntUniform", "min": -1000, "max": -1, "weight": 0.35, "comment": "负偏置范围均匀覆盖"},
+      {"type": "Choice", "options": [-1, -2, -4, -8, -16, -32, -64, -128], "weight": 0.25, "comment": "负的2的幂次偏置"}
+    ],
+    "Max": [{"type": "Static", "value": 2147483647, "weight": 1.0, "comment": "INT32 边界最大值"}],
+    "Min": [{"type": "Static", "value": -2147483648, "weight": 1.0, "comment": "INT32 边界最小值"}]
+  },
+
+  "role_index_tensor": {
+    "Typical": [
+      {"type": "IntUniform", "min": 0, "max": 31, "weight": 0.50, "comment": "小范围非负索引 (覆盖常见tensor维度)"},
+      {"type": "IntUniform", "min": 0, "max": 1023, "weight": 0.30, "comment": "中等范围索引"},
+      {"type": "Choice", "options": [0, 1, 2, 3, 7, 15, 31], "weight": 0.20, "comment": "典型索引值 (含边界邻近值)"}
+    ],
+    "Zero": [{"type": "Static", "value": 0, "weight": 1.0}],
+    "PosNormal": [
+      {"type": "IntUniform", "min": 1, "max": 32, "weight":0.5},
+      {"type": "IntUniform", "min": 1024, "max": 4096, "weight":0.5}],
+    "Pos": [
+      {"type": "IntUniform", "min": 1, "max": 32, "weight": 0.35, "comment": "小范围正索引 (常见tensor维度)"},
+      {"type": "IntUniform", "min": 1024, "max": 4096, "weight": 0.25, "comment": "大范围正索引 (如序列长度/vocab)"},
+      {"type": "Choice", "options": [1, 2, 3, 7, 15, 31, 63], "weight": 0.25, "comment": "边界邻近值 (2^n-1, 常触发off-by-one缺陷)"},
+      {"type": "Static", "value": 1, "weight": 0.15, "comment": "最小有效正索引"}
+    ],
+    "Neg": [
+      {"type": "IntUniform", "min": -1023, "max": -1, "weight": 0.35, "comment": "小到中范围, 连续覆盖"},
+      {"type": "IntUniform", "min": -4096, "max": -1024, "weight": 0.25, "comment": "大范围"},
+      {"type": "Choice", "options": [-1, -2, -3, -4, -8, -16, -32], "weight": 0.25, "comment": "常见负索引 (-1最后一个元素等)"},
+      {"type": "Static", "value": -1, "weight": 0.15, "comment": "常用负索引 (末尾元素)"}
+    ],
+    "Max": [{"type": "Static", "value": 2147483647, "weight": 1.0, "comment": "INT32 索引边界最大值"}],
+    "Min": [{"type": "Static", "value": -2147483648, "weight": 1.0, "comment": "INT32 索引边界最小值"}]
+  },
+
+  "role_quant_scale": {
+    "Typical": [{"type": "Uniform", "min": 0.1, "max": 2.0, "weight": 1.0}],
+    "Zero": [{"type": "Static", "value": 0.0, "weight": 1.0}],
+    "Pos": [
+      {"type": "Choice", "options": [1, 2, 4, 8, 16], "weight": 0.50, "comment": "2的幂次量化缩放 (硬件友好)"},
+      {"type": "IntUniform", "min": 1, "max": 16, "weight": 0.50, "comment": "小正整数量化缩放因子均匀采样"}
+    ],
+    "Max": [{"type": "Choice", "options": [127, 255, 32767], "weight": 1.0, "comment": "量化缩放 INT 边界最大值"}]
+  },
+
+  "role_quant_offset": {
+    "Typical": [
+      {"type": "IntUniform", "min": -16, "max": 16, "weight": 0.60, "comment": "小范围对称量化偏移 (最常见的zero-point)"},
+      {"type": "Static", "value": 0, "weight": 0.25, "comment": "对称量化时偏移为0"},
+      {"type": "Choice", "options": [-8, -4, -2, -1, 0, 1, 2, 4, 8], "weight": 0.15, "comment": "常见小偏移值"}
+    ],
+    "PosNormal": [{"type": "IntUniform", "min": 1, "max": 128, "weight": 1.0}],
+    "NegNormal": [{"type": "IntUniform", "min": -128, "max": -1, "weight": 1.0}],
+    "Zero": [{"type": "Static", "value": 0, "weight": 1.0}],
+    "Pos": [
+      {"type": "IntUniform", "min": 1, "max": 128, "weight": 0.60, "comment": "INT8正值范围量化偏移"},
+      {"type": "Choice", "options": [1, 2, 4, 8, 16, 32, 64, 128], "weight": 0.40, "comment": "2的幂次量化偏移"}
+    ],
+    "Neg": [
+      {"type": "IntUniform", "min": -128, "max": -1, "weight": 0.60, "comment": "INT8负值范围量化偏移"},
+      {"type": "Choice", "options": [-1, -2, -4, -8, -16, -32, -64, -128], "weight": 0.40, "comment": "负的2的幂次量化偏移"}
+    ],
+    "Max": [{"type": "Static", "value": 127, "weight": 1.0, "comment": "INT8 量化偏移最大值"}],
+    "Min": [{"type": "Static", "value": -128, "weight": 1.0, "comment": "INT8 量化偏移最小值"}]
+  },
+
+  "role_epsilon_float": {
+    "Typical": [{"type": "Uniform", "min": 1e-7, "max": 1e-4, "weight": 0.60, "comment": "典型epsilon范围 (1e-7 ~ 1e-4)"}, {"type": "Choice", "options": [1e-5, 1e-6, 1e-7, 1e-8], "weight": 0.40, "comment": "常用epsilon固定值 (如BN/LN的默认值)"}],
+    "PosNormal": [{"type":"Uniform","min": 1e-6,"max": 1e-3,"weight": 1.0}],
+    "Zero": [{"type": "Static", "value": 0.0, "weight": 1.0, "comment": "关键测试：除零"}]
+  },
+
+  "role_shape_attribute": {
+    "Typical": [
+      {"type": "IntUniform", "min": 2, "max": 64, "weight": 0.25},
+      {"type": "IntUniform", "min": 1024, "max": 4096, "weight": 0.25},
+      {"type": "Choice", "options": [1, 3, 5, 7, 9, 11, 13, 15], "weight": 0.25},
+      {"type": "Choice", "options": [2, 4, 8, 16, 32, 64], "weight": 0.25}
+    ],
+
+    "Zero": [{"type": "Static", "value": 0, "weight": 1.0, "comment": "关键测试：空张量"}],
+    "Pos": [
+      {"type": "IntUniform", "min": 2, "max": 64, "weight": 0.25, "comment": "小尺寸维度均匀采样"},
+      {"type": "IntUniform", "min": 1024, "max": 4096, "weight": 0.20, "comment": "大尺寸维度均匀采样 (如序列长度)"},
+      {"type": "Choice", "options": [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024], "weight": 0.25, "comment": "2的幂次维度 (硬件对齐最优)"},
+      {"type": "IntUniformOdd", "min": 3, "max": 63, "weight": 0.15, "comment": "奇数维度 (测试非对齐kernel)"},
+      {"type": "Choice", "options": [3, 5, 7, 14, 28, 224, 299, 384], "weight": 0.15, "comment": "经典模型维度 (如3通道, 224x224, 7x7 kernel)"}
+    ],
+    "Max": [{"type": "Choice", "options": [65536, 131072, 262144], "weight": 1.0, "comment": "极大维度 (压力测试)"}],
+    "Min": [{"type": "Static", "value": 1, "weight": 1.0, "comment": "最小有效维度"}]
+  },
+
+  "role_unclassified": {
+    "Typical": [
+      {"type": "Normal", "mean": 0, "std": 1, "weight": 0.60, "comment": "标准正态分布 (通用回退)"},
+      {"type": "Uniform", "min": -5, "max": 5, "weight": 0.40, "comment": "小范围均匀分布"}
+    ],
+    "PosNormal": [{"type": "Normal", "mean": 0, "std": 1, "weight": 1.0}],
+    "Zero": [{"type": "Static", "value": 0.0, "weight": 1.0}],
+    "NaN": [{"type": "Static", "value": "nan", "weight": 1.0}],
+    "Pos": [
+      {"type": "Normal", "mean": 10, "std": 8, "post_process": "abs_clip_min", "clip_min": 1, "weight": 0.40, "comment": "通用正整数高斯分布 (离散化, 截断取整)"},
+      {"type": "IntUniform", "min": 1, "max": 100, "weight": 0.18, "comment": "小正整数均匀覆盖 (高频区间)"},
+      {"type": "IntUniform", "min": 101, "max": 32767, "weight": 0.17, "comment": "中大正整数均匀覆盖"},
+      {"type": "Choice", "options": [1, 2, 4, 8, 16, 32, 64, 128], "weight": 0.25, "comment": "2的幂次"}
+    ],
+    "Neg": [
+      {"type": "Normal", "mean": -10, "std": 8, "post_process": "clip_max", "clip_max": -1, "weight": 0.40, "comment": "通用负整数高斯分布 (离散化, 截断取整)"},
+      {"type": "IntUniform", "min": -100, "max": -1, "weight": 0.18, "comment": "小负整数均匀覆盖 (高频区间)"},
+      {"type": "IntUniform", "min": -32767, "max": -101, "weight": 0.17, "comment": "中大负整数均匀覆盖"},
+      {"type": "Choice", "options": [-1, -2, -4, -8, -16, -32, -64, -128], "weight": 0.25, "comment": "负的2的幂次"}
+    ],
+    "Max": [{"type": "Static", "value": 2147483647, "weight": 1.0, "comment": "INT32 边界最大值"}],
+    "Min": [{"type": "Static", "value": -2147483648, "weight": 1.0, "comment": "INT32 边界最小值"}]
+  }
+}
