@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # ---- 共用参数 ----
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
 
+    # ---- LLM 调用超时（流式调用）----
+    # 单个 SSE chunk 之间的最大空闲间隔；超过则视为服务端卡死并主动 abort
+    llm_chunk_idle_timeout: float = Field(default=60.0, ge=1.0, le=600.0)
+    # 单次 LLM 调用的总超时（httpx read timeout 兜底）
+    llm_total_timeout: float = Field(default=600.0, ge=10.0, le=3600.0)
+
     @property
     def active_api_key(self) -> SecretStr:
         match self.llm_provider:

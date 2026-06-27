@@ -17,20 +17,23 @@
 
 ## 0. 目录结构
 
-本提示词共 10 章，建议按下列顺序阅读并使用：
+本提示词共 10 章 + 3 附录，建议按下列顺序阅读并使用：
 
 | 章节 | 名称 | 作用 |
 | ---- | ---- | ---- |
 | 1 | 角色与目标 | 明确模型身份、输入、输出 |
 | 2 | 全局输出规则 | 5 条铁律，缺一不可 |
 | 3 | 顶层 JSON Schema | 定义 `OperatorRule` 的 Pydantic 模型 |
-| 4 | 字段级提取规则 | 11 个一级字段逐一拆解 |
+| 4 | 字段级提取规则 | 10 个一级字段 + dimensions/隐式参数/allowed_range 详细映射 |
 | 5 | 平台与 dtype 命名规范 | 强约束的字符串字典 |
-| 6 | 表达式编写规范 | Python 表达式（`expr`）语法细则 |
+| 6 | 表达式编写规范 | Python 表达式（`expr`）语法细则 + 4 大模式模板 |
 | 7 | `expr_type` 取值字典 | 已知值参考表（`expr_type` 为自由 `str`） |
-| 8 | 边缘场景处理 | 缺失、歧义、冲突的统一处置 |
-| 9 | 自检清单 | 提取完成后必须执行 7 项检查 |
-| 10 | 调用模板 | 完整可复制的 prompt 调用片段 |
+| 8 | 边缘场景处理 | 缺失、歧义、冲突的统一处置（含 dimensions/allowed_range/隐式参） |
+| 9 | 自检清单 | 提取完成后必须执行 10 项检查 |
+| 10 | 调用模板 | 完整可复制的 prompt 调用片段（含知识库引用提示） |
+| 附录 A | 典型算子示例 | 10 个算子的关键提取点对照 |
+| 附录 B | v1→v2 升级注意事项 | 升级路径与扩展占位 |
+| 附录 C | 知识库路径速查表 | 本提示词与 `knowledge/` 的对应关系 |
 
 ---
 
@@ -290,11 +293,147 @@ class OperatorRule(BaseModel):
 | `array_length.src_text` | 是 | `str` | 摘录原文（如 `"长度为2"`） |
 | `dtype.value` | 是 | `List[str]` | 支持的 dtype 字符串（见 §5.2）；标量参数允许填写其自身类型字符串（如 `"bool"`、`"char"`、`"int"`）；不适用 → `[]` |
 | `dtype.src_text` | 是 | `str` | 摘录原文 |
-| `dimensions.value` | 是 | `List[int]` 或 `[]` | 维度约束：如 `[2, 3]` 表示 `2 ≤ rank ≤ 3`；不适用 → `[]` |
+| `dimensions.value` | 是 | `List[int]` 或 `[]` | **维度（rank）约束**：如 `[2, 3]` 表示 `2 ≤ rank ≤ 3`；不适用 → `[]` |
 | `dimensions.src_text` | 是 | `str` | 摘录原文（如 `"2-3"`、`"2维"`） |
+
+##### `dimensions.value` 解析表（来自 `knowledge/dimensions/SKILL.md`）
+
+| 原文形态 | `dimensions.value` | 备注 |
+| -------- | ------------------ | ---- |
+| `"0-8"` / `"2~6"` | `[0, 8]` / `[2, 6]` | Rank 区间 |
+| `"2D"` / `"3-D"` | `[2, 2]` / `[3, 3]` | Rank 精确（D 后缀） |
+| `"1D~8D"` / `"2维~8维"` | `[1, 8]` / `[2, 8]` | 带 D / 维 后缀的区间 |
+| `"1维"` / `"3维"` | `[1, 1]` / `[3, 3]` | 中文精确 |
+| `"1维，最大长度256"` | `[1, 1]`（长度256 不在此字段） | 长度限制另入 `constraints_in_parameters` |
+| `"(N,C,H,W)"` | `[4, 4]` | 符号元组，按逗号槽数 |
+| `"(H*rankSize, N)"` | `[2, 2]` | 复合表达式，按槽数 |
+| `"[2, 3, 4]"` | `[[2,2],[3,3],[4,4]]` | 纯数值 → per-dim |
+| `"[8]"` | `[[8,8]]` | 单维数值 |
+| `"[0-100, 0-200]"` | `[[0,100],[0,200]]` | per-dim 带区间 |
+| `"标量"` / `"0-D"` / `"scalar"` | `[]` | 标量 |
+| `""` / `"-"` / `"N/A"` | `[]` | 未说明 |
+| `"与输入相同"` / `"与xxx一致"` | `[]` | 跨参数引用，留给约束表达 |
+
+**关键原则 —— "维数 vs 长度" 区分**：
+- "N 维" 描述的是 tensor 的**维度数（rank）**，应输出 `[N, N]`；
+- "最大长度 M" / "最大长度为 M" 描述的是某一维的**大小限制**，**不属于 `dimensions`**；
+- 该大小限制应由 `constraints_in_parameters` 中的 `self_shape_axis_value` 约束表达。
+- **反例**：把 `"1维，最大长度256"` 解析为 `[[1, 256]]`（per-dim 格式）属于错误。
+
+**HTML 列表型 shape（量化参数特有）**：
+当 shape 描述里出现 `<ul><li>` + 多种方括号变体（如 `[E, N1]/[N1]`）：
+1. 从原文抽取**所有** `[...]` 方括号组；
+2. 每个组内按逗号槽数 = rank；
+3. 取所有变体的 rank 区间作为 `dimensions.value`；
+- 示例：`<ul><li>per-channel...[E, N1]/[N1]</li><li>per-group...[E, G, N1]/[G, N1]</li></ul>`
+  → `[E,N1]=2`、`[N1]=1`、`[E,G,N1]=3`、`[G,N1]=2` → 最终 `dimensions.value=[1, 3]`。
+
+**校验规则**：
+- rank 格式：`0 ≤ min ≤ max ≤ 10`；
+- per-dim 格式：每维 `min ≤ max`（或 `null`），最多 10 维；
+- `[]` 永远合法。
+
+#### 4.6.4 隐式参数（命名维度变量 / 外部常量）识别
+
+文档中常在 shape 描述里出现 **形如 `(BS, H)`、`(H*rankSize, N)`、`[E, N1]/[N1]` 的命名变量**，它们**不是函数签名参数**，但被下游 `constraints_in_parameters` 中的表达式引用。**必须**抽取到 `inputs` 中（`is_operator_param: false`），按以下规则分类（来自 `knowledge/implicit_params/SKILL.md`）：
+
+##### A. 标准命名维度变量（保留为隐式参数）
+
+| 标识符 | 典型上下文 | 类别 |
+| ------ | ---------- | ---- |
+| `N` / `C` / `H` / `W` | `(N, C, H, W)` | dimension_variable |
+| `BS` / `B` | `(BS, H)` | dimension_variable |
+| `batchSize` / `numHeads` | `(batchSize, numHeads)` | dimension_variable |
+| `k0` / `n0` / `m0` | `(k0, n0)` | dimension_variable（除非有等式赋值） |
+| `dim` / `rank` / `seqLen` | `(dim, rank)` | dimension_variable |
+| `E` / `G` / `N1` | `[E, N1]`、`[E, G, N1]` | dimension_variable |
+
+##### B. 复合表达式中的命名变量
+
+| 表达式 | 抽取 |
+| ------ | ---- |
+| `H*rankSize` | `H` 为 dimension_variable；`rankSize` 为 external_constant |
+| `BS/rankSize` | `BS` 为 dimension_variable；`rankSize` 为 external_constant |
+| `A*B`（两者均独立出现） | `A`、`B` 均为 dimension_variable |
+
+##### C. 必须剔除的"概念词 / 操作名 / 类型词"
+
+| 类别 | 剔除清单 |
+| ---- | -------- |
+| **维度概念词**（"X维度"中的X表示含义，不是变量名） | `Reduce`、`GEMV`、`Attention`、`Conv` |
+| **激活函数名** | `Softmax`、`ReLU`、`Sigmoid`、`GELU`、`SwiGLU` |
+| **归一化操作名** | `LayerNorm`、`BatchNorm` |
+| **卷积操作名** | `Conv`、`Conv2D`、`Conv3D` |
+| **矩阵乘操作名** | `Matmul`、`BMM`、`MM` |
+| **张量操作名** | `Transpose`、`Reshape`、`Permute` |
+| **泛型描述词** | `shape`、`dtype`、`format`、`type`、`input`、`output`、`tensor`、`optional`、`true`、`false`、`none`、`null` |
+| **基本类型词** | `float`、`double`、`int`、`char`、`void` |
+
+##### D. 常量识别（显式赋值 → 转为常量）
+
+| 原文模式 | 标识符 | 分类 | `constant_value` |
+| -------- | ------ | ---- | ---------------- |
+| `"其中k0 = 16"` | `k0` | constant | `16` |
+| `"n0为16"` | `n0` | constant | `16` |
+| `"k0等于16"` / `"k0 is 16"` | `k0` | constant | `16` |
+| `"其中 G = 128"` | `G` | constant | `128` |
+
+##### E. 外部常量识别（仅出现在复合表达式中 → external_constant）
+
+| 标识符 | 出现位置 | 类别 | 说明 |
+| ------ | -------- | ---- | ---- |
+| `rankSize` | `H*rankSize` | external_constant | 平台相关（NPU 卡数） |
+| `worldSize` | `BS/worldSize` | external_constant | 分布式训练相关 |
+| `padSize` | `N+padSize` | external_constant | 视上下文决定 |
+
+外部常量必须按平台分别给出 `allowed_range_value`（枚举式），如 `rankSize` 在 Atlas A2 上为 `[2,4,8]`，在 Atlas 350 上为 `[2,4,8,16]`。
+
+##### F. 漏抽取补充
+
+正则可能漏掉仅在**约束描述文字**中出现、但未在任何 shape 元组里出现的变量（如 "rankSize 的取值依赖于 NPU 卡数"）。**应当**将其补加到 `inputs`，类别为 `external_constant`。
 | `allowed_range_value.value` | 是 | `List[Any]` | 范围：`[[min, max], [min2, max2]]`（允许 `null` 边界表示无界）；枚举：`["val1", "val2"]` 或 `[false]`；不适用 → `[]` |
 | `allowed_range_value.type` | 是 | `str` | `"range"`（区间）/ `"enum"`（离散枚举） |
 | `allowed_range_value.src_text` | 是 | `str` | 摘录原文 |
+
+##### `allowed_range_value` 文本描述 → 结构化映射（来自 `knowledge/allowed_range/SKILL.md`）
+
+> `knowledge/allowed_range/` 知识库的 LLM 输出格式为**文本**形式（如 `"0-100"`、`"fastgelu,gelu"`），项目 `OperatorRule.allowed_range_value.value` 用**结构化**形式。**本提示词采用项目结构化形式**，但下列映射表必须严格遵守：
+
+| 原文描述 | `value` | `type` | 备注 |
+| -------- | ------- | ------ | ---- |
+| `"0-100"` / `"[-1,1]"` | `[[0, 100]]` / `[[-1, 1]]` | `range` | 区间 |
+| `"0或1"` | `[[0, 1]]` | `range` | 二元 |
+| `"0到5"` | `[[0, 5]]` | `range` | 中文区间 |
+| `"大于0"` | `[[1, null]]` | `range` | 半开（用 `null` 表示无界） |
+| `"小于1024"` | `[[null, 1023]]` | `range` | 半开 |
+| `"大于等于1"` | `[[1, null]]` | `range` | 半开 |
+| `"取值范围为245~333"` | `[[245, 333]]` | `range` | ~分隔 |
+| `"fastgelu/gelu/relu/silu"` | `["fastgelu", "gelu", "relu", "silu"]` | `enum` | `/` 分隔 |
+| `"fastgelu/gelu/relu/silu以及geglu/swiglu/reglu"` | `["fastgelu","gelu","relu","silu","geglu","swiglu","reglu"]` | `enum` | **必须拆分**为独立项 |
+| `"支持配置空或者[-2,-1]"` | `["空", [-2, -1]]` 或拆为两条 | `enum` | aclIntArray 特殊 |
+| `"per-channel/per-group/per-tensor/per-token"` | `["per-channel","per-group","per-tensor","per-token"]` | `enum` | 量化粒度 |
+| `"true/false"` | `[true, false]` | `enum` | bool 列举 |
+| 文档无任何取值约束 | `[]` | `range` | **不**在数组中产出该参数 |
+
+##### aclIntArray 特殊取值（`knowledge/allowed_range/examples/acl_int_array.md`）
+
+`aclIntArray` 参数的取值往往是**特定数组值**或**空数组**，`type` 统一设为 `enum`：
+
+| 原文 | `value` |
+| ---- | ------- |
+| `"支持配置空或者[-2,-1]"` | `["空", [-2, -1]]`（或拆为两条 enum 条目） |
+| `"支持配置[-2,-1]或[-1,-2]或空"` | `[[-2, -1], [-1, -2], "空"]` |
+
+##### bool 类型参数（`no_constraint.md`）
+
+bool 参数（`is_xxx`/`xxxFlag` 等）若文档未给固定取值约束，**不**在 `allowed_range_value` 中产出；项目代码会短路处理（`code=` 中的 fallback）。仅当文档明确说"暂不支持配为 True" 时，填 `[false]` + `type=range`。
+
+##### 无约束参数处理（`no_constraint.md`）
+
+下列场景**不**产出 `allowed_range_value.value` 条目（保持 `[]`）：
+- 描述只涉及 shape/dtype/format，不涉及值域；
+- Tensor / TensorList 参数（`aclTensor` / `aclTensorList`），维度不属于取值范围；
+- bool 类型且无固定值约束。
 
 ### 4.7 `constraints_in_parameters`（跨参数 / 单参数约束）
 
@@ -401,13 +540,14 @@ NDC1HWC0, FRACTAL_NZ_C0_16, NDHWC, NCHW_VECT_C0_16, NC1HWC0
 
 `expr` 字段必须是**合法 Python 布尔表达式**（`eval()` 可执行，返回 `bool`）。
 
-### 6.1 语法细则
+### 6.1 语法细则（综合 `knowledge/relation_skills/SKILL.md`）
 
-1. **变量引用**：使用**裸参数名**或 `参数名.shape[i]` / `参数名.dtype` / `参数名.range_value`：
+1. **变量引用**：使用**裸参数名**或 `参数名.shape[i]` / `参数名.dtype` / `参数名.format` / `参数名.range_value`：
    - ✅ `len(x.shape) == 3`
    - ✅ `x.shape[0] * x.shape[1] <= 2147483647`
    - ✅ `rankSize.range_value in [2, 4, 8]`
    - ✅ `x1.shape[0] == BS.range_value`
+   - ✅ `x1.format == x2.format`
    - ❌ `tensor_x.dim == 3`（**禁止**别名）
 2. **取值范围**：用区间 `[[min, max]]` 或离散列表 `[v1, v2]`：
    - ✅ `actType.range_value in [[0, 5]]`（对区间查）
@@ -415,20 +555,79 @@ NDC1HWC0, FRACTAL_NZ_C0_16, NDHWC, NCHW_VECT_C0_16, NC1HWC0
    - ✅ `alltoAllAxesOptional.range_value == [-2, -1]`（对固定值等号）
    - ✅ `transposeX1.range_value == False`（bool 等号）
    - 允许 `null` 边界：`[[null, 2147483647]]` 表示无下界
-3. **复合逻辑**：用 `and` / `or`；蕴含用 `(B) if (A) else True`：
-   - ✅ `(y.dtype == "FLOAT16") if (x.dtype == "FLOAT16") else True`
+3. **复合逻辑 —— 蕴含两种等价形式**：
+   - **形式 A（if/else）**：`(B) if (A) else True` —— 条件不满足时返回 True（约束不适用）
+     - ✅ `(bias.dtype == "FLOAT16") if (x.dtype == "FLOAT16") else True`
+   - **形式 B（unless 结构）**：`not(A) or B` —— 条件不满足时约束不生效
+     - ✅ `not(quantization_type.range_value == "per-channel") or (bias.shape == [E, N1])`
+     - ✅ `not(A and B) or C` 用于"两个条件同时成立才约束"的场景
+   - 等价关系（"A 当且仅当 B"）：`(A) == (B)`，如 `(scales2 is None) == (zeroPoints2 is None)`
 4. **生成器**：必须用 `all()` / `any()` 包裹：
    - ✅ `all(v >= 1 for v in padding.range_value)`
+   - ✅ `all(d > 0 for d in x.shape)`（不允许空 Tensor）
    - ❌ `[v >= 1 for v in padding.range_value]`（返回 list，不返回 bool）
-5. **禁止关键字**：`lambda`、非蕴含三元运算符滥用、`implies`、伪代码、平台值作判断条件。
-6. **空表达式**：不允许 `null`；无法表达时统一使用空字符串 `""`，保留 `expr_type` 与 `relation_params`。
-7. **参数名冲突**：当参数名为 `max`/`min`/`sum` 等内置函数名时，表达式中**不要再调用**同名内置函数；`relation_params` 仍写原名。
-8. **隐式维度变量 / 外部常量**：使用 `变量名.range_value` 形式（如 `BS.range_value`、`rankSize.range_value`）；这些符号必须登记在 `inputs` 中（`is_operator_param: false`）。
+5. **"维数 vs 长度"**：表达式中的 `len(x.shape)` 表示 rank，"shape size" 永远指 rank，**不是**各维大小乘积。
+6. **负索引优先**：当约束引用了以字母命名的维度（如 `H`、`W`）且该维度在 shape 描述中**始终处于固定语义位置**（如"最后一维"），必须使用 `shape[-1]` 而非固定正索引 `shape[1]` 或 `shape[3]`。
+7. **命名维度变量 / 外部常量引用**：使用 `变量名.range_value` 形式（如 `BS.range_value`、`rankSize.range_value`），不写 `BS.shape[0]`。
+8. **已知常量直接使用数值**：若文档给出 `k0 = 16` 这种赋值，表达式里直接写 `16`，不需要 `k0.range_value`。
+9. **禁止关键字**：`lambda`、非蕴含三元运算符滥用、`implies`、伪代码、平台值作为判断条件。
+10. **空表达式**：不允许 `null`；无法表达时统一使用空字符串 `""`，保留 `expr_type` 与 `relation_params`。
+11. **参数名冲突**：当参数名为 `max`/`min`/`sum` 等内置函数名时，表达式中**不要再调用**同名内置函数；`relation_params` 仍写原名。
 
 ### 6.2 表达式与 src_text 的对应
 
 - `expr` 表达什么，`src_text` 就摘录什么；
 - 表达式无法直接对应原句（如文档只给 "shape 与 x 一致"）时，`expr` 写 `out.shape == x.shape`，`src_text` 摘录 `"out 的 shape 与 x 保持一致"`。
+
+### 6.3 表达式模式库（按关系特征匹配）
+
+> 来自 `knowledge/relation_skills/` 4 个模式文件。按以下流程匹配：先识别场景特征 → 套用对应模板。
+
+#### 模式 1：枚举条件 + 条件 Shape（`enum_conditional_shape.md`）
+
+**适用场景**：同时含 `per-channel`/`per-tensor` 等枚举值、`Optional` 是否存在判断、`[E, N1]` 条件 shape。
+
+```text
+# 单条件
+not({enum_param}.range_value == "{value}")
+  or ({target}.shape == [{vars}.range_value, ...])
+
+# 双条件（枚举 + 存在性）
+not({enum_param}.range_value == "{value}" and {presence_param} is not None)
+  or ({target}.shape == [{vars}.range_value, ...])
+```
+
+#### 模式 2：多 Shape 候选（`multi_shape_choice.md`）
+
+**适用场景**：shape 有多个候选，由枚举参数或条件决定。
+
+```text
+# 二选一（条件驱动）
+({target}.shape == [shape_A]) if (condition) else ({target}.shape == [shape_B])
+
+# 多选一（枚举驱动）
+({target}.shape == [shape_A]) if ({enum}.range_value == "mode_A")
+else ({target}.shape == [shape_B]) if ({enum}.range_value == "mode_B")
+else True
+```
+
+#### 模式 3：存在性依赖（`presence_dependency.md`）
+
+```text
+# 互斥共存：(A is None) == (B is None)
+# 条件存在：(B is not None) if (A is not None) else True
+# 条件不存在：(B is None) if (A is not None) else True
+```
+
+#### 模式 4：单参数自身约束（`self_constraint.md`）
+
+```text
+# 取值范围：{min} < {param}.range_value < {max}  /  {param}.range_value > {min}
+# 允许枚举：{param}.range_value in [{v1}, {v2}, ...]
+# 维度数量：{min} <= len({param}.shape) <= {max}
+# 各维大小：all(d <= {max} for d in {param}.shape)
+# 空 Tensor 限制：all(d > 0 for d in {param}.shape)
+```
 
 ---
 
@@ -485,6 +684,18 @@ NDC1HWC0, FRACTAL_NZ_C0_16, NDHWC, NCHW_VECT_C0_16, NC1HWC0
 | `allowed_range_value` 区间无下界（"不小于0"但无上界或上界为INT32_MAX） | `value=[[null, 2147483647]]`（null表示无下/上界） |
 | 表达式无法用 Python 表达（自然语言公式） | `expr=""`，`src_text` 摘录原文，待人工校对 |
 | 文档出现矛盾（A段dtype=X，B段dtype=Y） | 优先**保守**取值（取并集），`src_text` 摘录矛盾原文，等待人工确认 |
+| 文档写"1维，最大长度256" | `dimensions.value=[1, 1]`，**长度256 不得放入 `dimensions`**；须在 `constraints_in_parameters` 中加 `self_shape_axis_value` 约束 |
+| 文档写"shape 与 weight1 一致" / "与输入相同" | `dimensions.value=[]`；**跨参数引用留给 `constraints_in_parameters`** 的 `shape_equality` 约束 |
+| 文档写"(BS, H) 或 (BS/rankSize, rankSize*H)" | 拆为 `shape_choice` 约束 + `parameter_representation` 约束；`dimensions.value` 按区间取值 |
+| 文档写"其中k0=16" | `k0` 归类为 `constant`，`constant_value=16`；不放入 `inputs`（直接写入 `expr` 表达式） |
+| 文档写"H*rankSize"中的 `rankSize` 仅在复合表达式出现 | 归类为 `external_constant`，按平台分别给 `allowed_range_value` |
+| 文档写"Reduce 维度需要…" | `Reduce` 是 reduce 操作概念词，**不**抽取为隐式维度变量 |
+| 文档写"Softmax、LayerNorm" | **不**抽取为隐式维度变量（是操作名 / 算法名） |
+| 文档写"支持配置空或者[-2,-1]"（aclIntArray） | `allowed_range_value.value=[[-2, -1]]` 或拆为两条 enum 条目，`type=enum` |
+| 文档写"仅 Atlas A2 支持 BF16" | 在对应平台的 `dtype.value` 中体现差异，`src_text` 摘录原文 |
+| 文档写"shape 为 [E, N1] / [N1]（per-channel / per-tensor）" | `dimensions.value=[1, 3]`（HTML 多变体取区间），shape 选择逻辑走 `shape_choice` / `shape_value_dependency` 约束 |
+| 文档写"x 和 y 必须共存，要么都存在要么都不存在" | `expr_type=presence_dependency`，`expr=(x is None) == (y is None)` |
+| 文档写"actType 取值为 0 到 5" | `allowed_range_value.value=[[0, 5]]`，`type=range`；不必重复进 `constraints_in_parameters`，但可附加 `self_value_range` 条目增强机器可判定性 |
 
 ---
 
@@ -499,6 +710,9 @@ NDC1HWC0, FRACTAL_NZ_C0_16, NDHWC, NCHW_VECT_C0_16, NC1HWC0
 5. **表达式合法**：每条 `expr`（非空）用 `python -c` 试 `eval`，无 `SyntaxError`/`NameError`；返回 `bool`。
 6. **关系参数一致**：`expr` 中**所有出现的标识符**都在 `relation_params` 中；`relation_params` 中所有参数名都在 `inputs`/`outputs` 有对应卡片（隐式维度变量/外部常量允许例外，但须在 `inputs` 中登记）。
 7. **来源可溯**：`function_explanation`/`dtype`/`format`/`dimensions`/`allowed_range_value` 的 `src_text` 至少 30% 非空（无来源的纯模型外推视为无效）。
+8. **隐式参数完整性**：所有在 `constraints_in_parameters` 的 `expr` 中出现的**非函数签名标识符**（如 `BS`、`H`、`N`、`rankSize`），必须**全部**出现在 `inputs` 中，且 `is_operator_param.value=false`。
+9. **dimensions 合理性**：`dimensions.value` 若非空，则形态必须合规（rank 格式 `[min, max]` 且 `0 ≤ min ≤ max ≤ 10`，或 per-dim 格式 `[[min,max], ...]`）。
+10. **枚举拆分完整**：若 `allowed_range_value.type=enum` 且 value 是 `List[str]`，则字符串中**不得**再包含 `/`、`、`、`以及`、`and`、`/` 等分隔符（必须已被拆成独立元素）。
 
 ---
 
@@ -509,7 +723,12 @@ NDC1HWC0, FRACTAL_NZ_C0_16, NDHWC, NCHW_VECT_C0_16, NC1HWC0
 ```text
 # System
 你是一名昇腾 CANN 算子约束抽取专家。
-请严格遵循《算子约束提取通用提示词 v1》的所有规则。
+请严格遵循《算子约束提取通用提示词 v1》的所有规则，并参考知识库：
+- 解析 shape/dimensions 时参考 §4.6.3 dimensions 解析表
+- 识别隐式维度变量时参考 §4.6.4（概念词/操作名/类型词需剔除）
+- 写 expr 表达式时参考 §6.3 模式库（按关系特征匹配模板）
+- 写 allowed_range_value 时参考 §4.6.3 allowed_range 文本→结构化映射
+
 输出必须是**纯 JSON 字符串**，无任何前后缀。
 
 # User
@@ -529,7 +748,7 @@ NDC1HWC0, FRACTAL_NZ_C0_16, NDHWC, NCHW_VECT_C0_16, NC1HWC0
 ## 你的任务
 1. 完整阅读算子说明文档；
 2. 按《算子约束提取通用提示词 v1》第 3 章 schema 输出 JSON；
-3. 内部执行第 9 章 7 项自检；
+3. 内部执行第 9 章 10 项自检；
 4. **仅返回 JSON 字符串**，不要包含任何解释、代码块标记或额外文字。
 ```
 
@@ -565,3 +784,25 @@ NDC1HWC0, FRACTAL_NZ_C0_16, NDHWC, NCHW_VECT_C0_16, NC1HWC0
 - `expr_type` 为自由 `str`，§7 仅作参考；若新增语义（如 `shape_value_enum`），追加到 §7.2 并附真实算子样例。
 - 若增加新平台（昇腾下一代硬件），在 §5.1 字典中追加官方字符串。
 - 若未来 schema 要求 `ValueWithSrcText` 包裹更多字段（如 `description`），同步更新 §3 与 §4.6.3。
+
+---
+
+## 附录 C：知识库路径速查表
+
+> 本提示词融合了项目 `knowledge/` 目录下的全部 SKILL 内容。下表把各 SKILL 的关键规则映射到本提示词对应章节，方便维护与对照。
+
+| 知识库路径 | 涵盖规则 | 本提示词位置 |
+| ---------- | -------- | ------------ |
+| [`knowledge/dimensions/SKILL.md`](knowledge/dimensions/SKILL.md) | rank vs per-dim 区分、`(N,C,H,W)` 元组解析、`[E,N1]/[N1]` HTML 多变体、维数 vs 长度区分 | §4.6.3 dimensions 解析表 |
+| [`knowledge/allowed_range/SKILL.md`](knowledge/allowed_range/SKILL.md) | `range` vs `enum` 语义、枚举拆分规则（`/`/`、`/`以及`/`and`）、平台差异标注 | §4.6.3 allowed_range 文本→结构化映射 |
+| [`knowledge/allowed_range/examples/numeric_range.md`](knowledge/allowed_range/examples/numeric_range.md) | `"0-100"` / `"[1,8]"` / `"大于0"` / `"取值范围为0或1"` 格式转换 | §4.6.3 allowed_range 映射表 |
+| [`knowledge/allowed_range/examples/enum_string.md`](knowledge/allowed_range/examples/enum_string.md) | 字符串枚举拆分（激活函数、量化类型） | §4.6.3 allowed_range 映射表 + §8 |
+| [`knowledge/allowed_range/examples/acl_int_array.md`](knowledge/allowed_range/examples/acl_int_array.md) | aclIntArray 取 `空` 或特定数组 | §4.6.3 + §8 |
+| [`knowledge/allowed_range/examples/no_constraint.md`](knowledge/allowed_range/examples/no_constraint.md) | 无约束参数不产出、bool 参数不产出 | §4.6.3 + §8 |
+| [`knowledge/allowed_range/examples/platform_specific.md`](knowledge/allowed_range/examples/platform_specific.md) | 按平台分行处理取值差异 | §4.6.2 二级 key 规则 |
+| [`knowledge/implicit_params/SKILL.md`](knowledge/implicit_params/SKILL.md) | 命名维度变量、概念词剔除、操作名剔除、常量/外部常量识别 | §4.6.4 隐式参数识别 |
+| [`knowledge/relation_skills/SKILL.md`](knowledge/relation_skills/SKILL.md) | `expr` 通用规则、`.range_value` / `.dtype` / `.format` 引用、`all()/any()` 包裹、负索引 | §6.1 语法细则 |
+| [`knowledge/relation_skills/self_constraint.md`](knowledge/relation_skills/self_constraint.md) | 单参数自身约束 5 类模板 | §6.3 模式 4 |
+| [`knowledge/relation_skills/multi_shape_choice.md`](knowledge/relation_skills/multi_shape_choice.md) | 多 Shape 候选模板（条件 / 枚举 / unless） | §6.3 模式 2 |
+| [`knowledge/relation_skills/enum_conditional_shape.md`](knowledge/relation_skills/enum_conditional_shape.md) | 枚举条件 + 条件 Shape 模板 | §6.3 模式 1 |
+| [`knowledge/relation_skills/presence_dependency.md`](knowledge/relation_skills/presence_dependency.md) | 存在性依赖 3 类模板 | §6.3 模式 3 |

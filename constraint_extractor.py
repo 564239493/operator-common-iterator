@@ -188,6 +188,7 @@ def extract_constraints(
             )
 
         # ── 调用 LLM（通过 backend，每次是独立 session）──
+        logger.info(">>> 开始调用 backend.invoke() [attempt=%d]", attempt)
         try:
             raw_output = backend.invoke(
                 system_prompt=prompt_template,
@@ -195,7 +196,7 @@ def extract_constraints(
                 temperature=temperature,
             )
         except Exception as e:
-            logger.error("LLM 调用失败: %s", e)
+            logger.error("LLM 调用失败 (attempt=%d): %s", attempt, e)
             return None, str(e), attempt
 
         logger.info("第 %d 次 LLM 返回完成 (len=%d)", attempt, len(raw_output))

@@ -93,7 +93,7 @@ class ThreadSafeLogger:
         self,
         log_name: Optional[str] = None,
         log_dir: str = "./logs",
-        log_level: int = logging.DEBUG,
+        log_level: int = logging.ERROR,
         rotation_type: str = "time",  # "time" 或 "size"
         # 按时间轮转参数
         rotation_interval: int = 1,  # 轮转间隔

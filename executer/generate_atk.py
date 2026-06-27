@@ -20,16 +20,6 @@ logger = logging.getLogger(__name__)
 _RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
 _GENERATOR_SCRIPT = _RESOURCES_DIR / "generator.py"
 _SIGNATURES_FILE = _RESOURCES_DIR / "aclnn_extracted.txt"
-# Project root = parents[6] of this file:
-#   executer_subgraph/generate_atk.py
-#   executer_subgraph/     -> parents[0]
-#   nodes/                 -> parents[1]
-#   agent/                 -> parents[2]
-#   src/                   -> parents[3]
-#   agent/ (package)       -> parents[4]
-#   packages/              -> parents[5]
-#   operator-agent/        -> parents[6]  <- project root
-_OUTPUT_DIR = Path(__file__).resolve().parents[6] / "executors"
 
 
 def _run_generator(cmd: list[str]) -> tuple[int, str, str]:
@@ -79,8 +69,10 @@ async def exec_generate_atk_node(state: PipelineState) -> dict[str, Any]:
     logger.info("exec_generate_atk: generating ATK executor for %s", operator_name)
 
     try:
-        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        output_file = _OUTPUT_DIR / f"{operator_name}_atk_executor.py"
+        # 输出到 cases_path 所在目录 (即 iterator_output 下的迭代目录)
+        output_dir = Path(cases_path).resolve().parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / f"{operator_name}_atk_executor.py"
 
         cmd = [
             sys.executable,

@@ -42,7 +42,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 # -- 确保 agent.generators 可导入（用例生成依赖 operator-agent 的 generators 包）--
 _AGENT_ROOT = Path(__file__).resolve().parent.parent / "operator-project" / "operator-agent"
@@ -483,105 +483,127 @@ class IterativePipeline:
         return fallback
 
     async def _real_execute_async(self, record: IterationRecord, iter_dir: Path):
-        """真实 SSH 执行。"""
-        from agent.nodes.executer_subgraph.ssh_executor import (
-            ServerEndpoint, connect, sftp_upload, run, find_latest_output_dir,
-        )
-        from agent.nodes.executer_subgraph.execution_result import ExecutionResult
-        from agent.nodes.executer_subgraph.report_parser import (
-            collect_remote_artifacts,
-        )
+        """真实 SSH 执行 — 通过 executer_subgraph 调用（generate_atk → cpu_derivation → run_atk）。
 
-        # 取第一个平台
-        platforms = list(record.constraints_json.get("product_support", []))
+        不再手写 SSH 上传 + atk 命令 — 改为构造 PipelineState 并 ainvoke 整个子图，
+        自动复用 operator-agent 项目标准的 executor 生成、CPU golden 增强、SSH 上传、
+        atk 命令组装、产物下载/解析流程。失败时回退到 _mock_execute 保持原迭代语义。
+        """
+        from agent.nodes.executer_subgraph import create_executer_subgraph
+
+        # ── 前置检查：失败 → 回退 mock ──
+        platforms = list((record.constraints_json or {}).get("product_support", []))
         if not platforms:
-            logger.error("约束中没有 product_support，无法选择服务器")
+            logger.error("约束中没有 product_support，回退到 Mock")
             self._mock_execute(record, iter_dir)
             return
 
-        platform = platforms[0]
-        server = self._load_server_for_platform(platform)
+        server = self._load_server_for_platform(platforms[0])
         if not server:
             logger.error("无可用服务器，回退到 Mock")
             self._mock_execute(record, iter_dir)
             return
 
-        endpoint = ServerEndpoint.from_server_row(server)
-        operator_name = self.operator_name
-
-        # 远程路径
-        remote_home = "/home/operator_atk"
-        remote_cases = f"{remote_home}/cases/{operator_name}_cases.json"
-
-        # 本地文件
         cases_path = iter_dir / "cases.json"
-        if not cases_path.exists():
-            logger.error("用例文件不存在: %s", cases_path)
+        if not cases_path.exists() or record.case_count == 0:
+            logger.error("用例文件缺失或 case_count=0，回退到 Mock")
             self._mock_execute(record, iter_dir)
             return
 
-        overall_start = time.time()
-
         try:
-            conn = await connect(endpoint, timeout=30.0)
-
-            # 上传用例
-            await sftp_upload(conn, str(cases_path), remote_cases)
-            logger.info("用例已上传: %s -> %s", cases_path, remote_cases)
-
-            # 运行 ATK（简化版：直接用 atk 命令）
-            env_init = server.get("env_init_script", "/usr/local/Ascend/ascend-toolkit/set_env.sh")
-            cmd = (
-                f"source {env_init} && "
-                f"cd {remote_home} && "
-                f"atk node --backend cpu task "
-                f"-c {remote_cases} "
-                f"--task accuracy "
-                f"--bind_cpu_type BIND_IN_PHYSICAL"
-            )
-            logger.info("远端命令: %s", cmd)
-            cmd_result = await run(conn, cmd, timeout=1800.0)
-
-            # 收集结果
-            output_dir = await find_latest_output_dir(conn, f"{remote_home}/atk_output", operator_name)
-
-            result = ExecutionResult()
-            result.exit_code = cmd_result.exit_code
-            result.stdout = cmd_result.stdout
-            result.stderr = cmd_result.stderr
-            result.duration = time.time() - overall_start
-
-            if cmd_result.exit_code == 0:
-                result.status = "success"
-            else:
-                result.status = "failed"
-
-            if output_dir:
-                # 执行产物直接放到当前迭代目录下,不再嵌套 operator/iter_NNN
-                cache_dir = iter_dir / "execution_results"
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                report_data, log_content, _ = await collect_remote_artifacts(conn, output_dir, cache_dir)
-                result.task_report_data = report_data
-                result.log_content = log_content
-                record.passed_count = report_data.passed
-                record.failed_count = report_data.failed
-
-            record.execution_result = result.model_dump()
-            record.execution_status = result.status
-
-            conn.close()
-            logger.info("真实执行完成: status=%s passed=%d failed=%d",
-                        result.status, record.passed_count, record.failed_count)
-
+            operator_doc = self.doc_path.read_text(encoding="utf-8")
         except Exception as e:
-            logger.exception("真实执行失败: %s", e)
+            logger.error("无法读取算子文档 %s: %s — 回退到 Mock", self.doc_path, e)
+            self._mock_execute(record, iter_dir)
+            return
+
+        # ── 调用 subgraph ──
+        run_id = f"iter_{record.iteration:03d}"
+        state_input: dict[str, Any] = {
+            "operator_name":    self.operator_name,
+            "cases_path":       str(cases_path),
+            "content":          operator_doc,
+            "server_info":      server,
+            "task_type":        "accuracy",
+            "execution_count":  1,
+            "run_id":           run_id,
+        }
+
+        graph = create_executer_subgraph()
+        try:
+            result = await graph.ainvoke(state_input)
+        except Exception as e:
+            logger.exception("executer_subgraph.ainvoke 抛异常: %s", e)
             record.execution_result = {
                 "status": "error",
-                "error_message": str(e),
+                "error_message": f"subgraph ainvoke 异常: {e}",
                 "passed": 0, "failed": 0,
             }
             record.execution_status = "error"
-            record.failed_count = 1
+            record.passed_count = 0
+            record.failed_count = 0
+            (iter_dir / "execution_result.json").write_text(
+                json.dumps(record.execution_result, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return
+
+        # ── 处理 subgraph 错误：回退 mock ──
+        error = result.get("error")
+        exec_result = result.get("exec_result") or {}
+        if error:
+            logger.warning("executer_subgraph 返回 error=%r — 回退到 Mock", error)
+            self._mock_execute(record, iter_dir)
+            return
+
+        # ── 成功：映射字段 ──
+        record.execution_result = exec_result
+        record.execution_status = exec_result.get("status", "failed")
+        record.passed_count = int(exec_result.get("passed", 0) or 0)
+        record.failed_count = int(exec_result.get("failed", 0) or 0)
+
+        # ── 写 iter_dir/execution_result.json（_step_analyze 依赖此文件） ──
+        (iter_dir / "execution_result.json").write_text(
+            json.dumps(exec_result, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        # ── 镜像 subgraph 产物到 iter_dir/（用户选择：全部镜像） ──
+        iter_exec = iter_dir / "execution_results"
+        iter_exec.mkdir(parents=True, exist_ok=True)
+        subgraph_cache = _AGENT_ROOT / "execution_results" / self.operator_name / run_id
+        if subgraph_cache.exists():
+            try:
+                for src in subgraph_cache.iterdir():
+                    dst = iter_exec / src.name
+                    if src.is_file():
+                        shutil.copy2(src, dst)
+                    elif src.is_dir():
+                        shutil.copytree(src, dst, dirs_exist_ok=True)
+                logger.info("执行产物已镜像到: %s", iter_exec)
+            except Exception as e:
+                logger.warning("镜像执行产物失败: %s", e)
+        else:
+            logger.info(
+                "subgraph cache 不存在 (%s) — 跳过产物镜像", subgraph_cache,
+            )
+
+        # ── 镜像 executor.py 到 iter_dir/ ──
+        executor_src_str = result.get("atk_executor_path")
+        if executor_src_str:
+            executor_src = Path(executor_src_str)
+            if executor_src.exists():
+                try:
+                    shutil.copy2(executor_src, iter_dir / executor_src.name)
+                    logger.info("executor 已镜像到: %s", iter_dir / executor_src.name)
+                except Exception as e:
+                    logger.warning("镜像 executor 失败: %s", e)
+
+        logger.info(
+            "executer_subgraph 完成: status=%s passed=%d failed=%d duration=%.1fs",
+            record.execution_status, record.passed_count, record.failed_count,
+            exec_result.get("duration", 0.0),
+        )
 
     def _real_execute(self, record: IterationRecord, iter_dir: Path):
         """真实 SSH 执行 — 调用 executer 模块。"""

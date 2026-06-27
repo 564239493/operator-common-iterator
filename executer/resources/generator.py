@@ -744,11 +744,16 @@ def main():
 
     # 输出路径
     base = os.path.splitext(args.case_json)[0]
+    case_basename = os.path.basename(base)
 
     # 写回展开后的 JSON，供 ATK 在服务器端读取
     # ATK 需要嵌套 list 格式 [[{entry1}, {entry2}, ...]]，不识别 length 简写
-    # 文件名与原 JSON 相同，放在和生成的 py 文件同一目录
-    expanded_json_path = base + "_expanded.json"
+    # 放在和生成的 py 文件同一目录（若指定了 -o 则用其目录，否则与输入 JSON 同目录）
+    if args.output:
+        expanded_dir = os.path.dirname(args.output) or "."
+    else:
+        expanded_dir = os.path.dirname(args.case_json) or "."
+    expanded_json_path = os.path.join(expanded_dir, case_basename + "_expanded.json")
     with open(expanded_json_path, "w", encoding="utf-8") as f:
         json.dump(cases, f, ensure_ascii=False, indent=2)
     print(f"已生成: {expanded_json_path} (展开后的 JSON，用于 ATK 服务器端运行)")
