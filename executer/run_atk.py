@@ -6,9 +6,10 @@ The flow:
    (``state["server_info"]``).  Engine-level failures (TCP, auth, SFTP)
    short-circuit the pipeline with ``state["error"]`` set.
 
-2. SFTP-upload the cases JSON and the ATK executor script to the
-   canonical remote locations:
-   - ``/home/operator_atk/cases/{operator_name}_cases.json``
+2. SFTP-upload the cases JSON (the expanded variant produced by
+   :mod:`executer.resources.generator`, not the original ``cases.json``)
+   and the ATK executor script to the canonical remote locations:
+   - ``/home/operator_atk/cases/{operator_name}_cases_expanded.json``
    - ``/home/operator_atk/atk_executor/{operator_name}_executor.py``
 
 3. Run the ``atk node --backend cpu task`` command via
@@ -73,7 +74,21 @@ _DEFAULT_ATK_TIMEOUT = 1800.0
 
 
 def _remote_cases_path(operator_name: str) -> str:
-    return f"{_REMOTE_CASES_DIR}/{operator_name}_cases.json"
+    # Name mirrors the local ``cases_expanded.json`` artifact produced by
+    # ``executer/resources/generator.py`` (input basename + ``_expanded``).
+    return f"{_REMOTE_CASES_DIR}/{operator_name}_cases_expanded.json"
+
+
+def _local_expanded_cases_path(cases_path: str | Path) -> Path:
+    """Map a local ``cases.json`` to its sibling ``cases_expanded.json``.
+
+    Mirrors the naming rule in :mod:`executer.resources.generator` —
+    ``os.path.splitext(args.case_json)[0] + "_expanded.json"``.  Pure
+    string rewrite on stem + suffix so it stays correct if the local
+    filename is ``cases.json``, ``foo.json``, etc.
+    """
+    p = Path(cases_path)
+    return p.with_name(f"{p.stem}_expanded{p.suffix}")
 
 
 def _remote_executor_path(operator_name: str) -> str:
@@ -182,7 +197,19 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
     try:
         # ── 2. SFTP upload cases + executor ────────────────────────────────
         try:
-            await sftp_upload(conn, cases_path, _remote_cases_path(operator_name))
+            # Prefer the expanded variant produced by generator.py (nested-list
+            # ``inputs`` format that ATK actually consumes).  Fall back to the
+            # raw cases.json when the expanded file is missing — older runs or
+            # manual cases without a generator pass shouldn't fail here.
+            expanded_local = _local_expanded_cases_path(cases_path)
+            cases_upload_src = (
+                str(expanded_local) if expanded_local.exists() else cases_path
+            )
+            logger.info(
+                "exec_run_atk: uploading cases %s -> %s",
+                cases_upload_src, _remote_cases_path(operator_name),
+            )
+            await sftp_upload(conn, cases_upload_src, _remote_cases_path(operator_name))
             await sftp_upload(conn, executor_path, _remote_executor_path(operator_name))
         except SSHEngineError as e:
             logger.exception("exec_run_atk: SFTP upload failed for %s", operator_name)
