@@ -396,6 +396,43 @@ class IterativePipeline:
             # 完全在本项目内做，不依赖任何 operator-agent 改动。
             self._archive_generator_log(record, iter_dir)
 
+    @staticmethod
+    def _safe_move(src: Path, dst: Path, log) -> None:
+        """跨平台安全移动文件 — 处理 Windows 文件锁（WinError 32）。
+
+        常见诱因：
+        * VSCode/Notepad 正打开日志（持有 read handle）
+        * generator 进程刚退出，OS 还没释放句柄
+        * 日志 handler 缓存未 flush
+
+        策略：指数退避重试（200ms → 400ms → 800ms → 1.6s → 3.2s，~6s），
+        最后一次失败时 fallback 到 ``copy2 + unlink``（即使有 read handle 也能成功）。
+        """
+        import time as _time
+        last_err: Exception | None = None
+        for attempt in range(5):
+            try:
+                shutil.move(str(src), str(dst))
+                return
+            except (PermissionError, OSError) as e:
+                last_err = e
+                if attempt < 4:
+                    _time.sleep(0.2 * (2 ** attempt))
+        # 5 次重试全失败：fallback 到 copy + delete
+        # （copy 是新开 read handle，只要没独占锁就能成功）
+        try:
+            shutil.copy2(str(src), str(dst))
+            try:
+                src.unlink()
+            except OSError as ue:
+                # 复制成功但删不掉原文件 — 至少归档成功，警告一下
+                log.warning("归档已复制但原文件删除失败 (%s): %s", src, ue)
+            return
+        except Exception:
+            # copy 也失败：抛出原始错误让调用方记录
+            assert last_err is not None
+            raise last_err
+
     def _archive_generator_log(
         self, record: IterationRecord, iter_dir: Path,
     ) -> None:
@@ -439,13 +476,15 @@ class IterativePipeline:
                 continue
             dst = iter_dir / "generate_case.log"
             try:
-                shutil.move(str(src), str(dst))
+                self._safe_move(src, dst, logger)
                 logger.info("generator 日志已归档: %s -> %s", src, dst)
                 moved = True
                 break  # 一个算子只搬一个文件
             except Exception as e:
                 logger.warning(
-                    "归档 generator 日志失败 (%s -> %s): %s",
+                    "归档 generator 日志失败 (%s -> %s): %s "
+                    "(可能 VSCode/Notepad 正打开该日志，或 generator 进程"
+                    "未完全释放文件句柄)",
                     src, dst, e,
                 )
         # 没找到也不报错：mock 模式 / 没装 generator 时本来就不会有日志

@@ -321,12 +321,18 @@ class CliAgentBackend(LLMBackend):
                         （默认 "-p {prompt} --print --output-format text"）
     """
 
-    def __init__(self, model: str | None = None):
+    def __init__(self, model: str | None = None,
+                 stream_to_console: bool | None = None):
         settings = get_settings()
         self._bin = settings.cli_agent_bin
         self._args_template = settings.cli_agent_args
         # model 在当前 CLI 模式下通常不需要（由 CLI 自身决定），保留接口一致性
         self._model = model or ""
+        # 流式输出到 stderr：None 沿用 .env 配置
+        self._stream_to_console = (
+            stream_to_console if stream_to_console is not None
+            else settings.llm_stream_console_output
+        )
 
     @property
     def name(self) -> str:
@@ -350,6 +356,14 @@ class CliAgentBackend(LLMBackend):
         logger.info("CliAgent: spawning %s", self._bin)
         logger.debug("Cmd: %s", " ".join(cmd[:4]) + " ...")
 
+        # 流式模式用 Popen 实时打印；否则保持原 subprocess.run 行为
+        if self._stream_to_console:
+            return self._invoke_streaming(cmd)
+        return self._invoke_capture(cmd)
+
+    def _invoke_capture(self, cmd: list[str]) -> str:
+        """原 subprocess.run 行为：等子进程结束一次性返回。"""
+        import subprocess
         try:
             result = subprocess.run(
                 cmd,
@@ -376,7 +390,89 @@ class CliAgentBackend(LLMBackend):
         if not output and result.stderr:
             # 有些 CLI 工具把结果输出到 stderr
             output = result.stderr.strip()
+        return output
 
+    def _invoke_streaming(self, cmd: list[str]) -> str:
+        """Popen 流式：边收边打到 stderr，肉眼能看到 CLI 在干活。
+
+        注：CLI 工具自身把 thinking/content 揉在 stdout 里，没有协议层的
+        分段（不像 OpenAI streaming 的 delta 字段），所以这里只能原样转发。
+        """
+        import subprocess
+        import threading
+        import time as _time
+
+        print(f"\n[cli-stream ↓] {self._bin}", file=sys.stderr, flush=True)
+        t_start = _time.monotonic()
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        proc_error: list[Exception] = []
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1,  # 行缓冲
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"CLI agent 未找到: {self._bin}。"
+                f"请确认已安装并在 PATH 中，或设置 CLI_AGENT_BIN 为完整路径。"
+            )
+
+        # 后台线程：读 stderr 防止 PIPE 阻塞；前台线程：读 stdout 实时打
+        def _drain_stderr():
+            try:
+                for line in proc.stderr:
+                    stderr_chunks.append(line)
+            except Exception as e:
+                proc_error.append(e)
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
+        last_heartbeat = _time.monotonic()
+        try:
+            for line in proc.stdout:
+                stdout_chunks.append(line)
+                print(line, end="", flush=True, file=sys.stderr)
+
+                # heartbeat：每 5s 提示一下，避免长 CLI 看起来卡死
+                now = _time.monotonic()
+                if now - last_heartbeat >= 5.0:
+                    print(
+                        f"\n  ♥ cli-heartbeat | {_time.monotonic() - t_start:.1f}s "
+                        f"elapsed | {len(''.join(stdout_chunks))} chars received",
+                        file=sys.stderr, flush=True,
+                    )
+                    last_heartbeat = now
+        finally:
+            try:
+                proc.wait(timeout=600)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raise RuntimeError(f"CLI agent 超时 (600s): {self._bin}")
+
+        stderr_thread.join(timeout=2)
+
+        if proc.returncode != 0:
+            logger.warning("CLI agent 返回非零退出码 %d", proc.returncode)
+            if stderr_chunks:
+                logger.warning("Stderr: %s", "".join(stderr_chunks)[:500])
+
+        elapsed = _time.monotonic() - t_start
+        print(
+            f"\n[cli-stream ↑] {self._bin} done in {elapsed:.1f}s",
+            file=sys.stderr, flush=True,
+        )
+
+        output = "".join(stdout_chunks).strip()
+        if not output and stderr_chunks:
+            output = "".join(stderr_chunks).strip()
         return output
 
     def _invoke_via_file(self, prompt: str, temperature: float) -> str:
@@ -393,11 +489,9 @@ class CliAgentBackend(LLMBackend):
 
         try:
             cmd = self._build_command(f"@file:{tmp_path}")
-            result = subprocess.run(
-                cmd, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=600,
-            )
-            return result.stdout.strip() or result.stderr.strip()
+            if self._stream_to_console:
+                return self._invoke_streaming(cmd)
+            return self._invoke_capture(cmd)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
@@ -413,7 +507,8 @@ class CliAgentBackend(LLMBackend):
 # 工厂函数
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def create_backend(backend_type: str = "api", model: str | None = None) -> LLMBackend:
+def create_backend(backend_type: str = "api", model: str | None = None,
+                  stream_to_console: bool | None = None) -> LLMBackend:
     """创建 LLM 后端实例。
 
     Args:
@@ -421,6 +516,9 @@ def create_backend(backend_type: str = "api", model: str | None = None) -> LLMBa
             - "api":  通过 langchain_openai 调用 LLM API（DeepSeek / Z.AI）
             - "agent": 通过 subprocess 调用 CLI 工具（claude / opencode CLI）
         model: 覆盖 .env 中的模型名（仅 api 模式有效）。
+        stream_to_console: 是否流式输出到 stderr（thinking + content）。
+            - None（默认）: 沿用 .env 的 LLM_STREAM_CONSOLE_OUTPUT
+            - True/False: 临时覆盖
 
     Raises:
         ValueError: 不支持的 backend_type。
@@ -428,10 +526,10 @@ def create_backend(backend_type: str = "api", model: str | None = None) -> LLMBa
     backend_type = backend_type.lower().strip()
 
     if backend_type == "api":
-        return APIBackend(model=model)
+        return APIBackend(model=model, stream_to_console=stream_to_console)
 
     if backend_type == "agent":
-        return CliAgentBackend(model=model)
+        return CliAgentBackend(model=model, stream_to_console=stream_to_console)
 
     raise ValueError(
         f"Unsupported backend type: '{backend_type}'. "
