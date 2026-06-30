@@ -4,9 +4,9 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple
 
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import ParamModelConfig
-from agent.generators.common_model_definition import OperatorRule, InterParamConstraint, InterConstraintsRuleType
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.constants import ParamModelConfig
+from generators.common_model_definition import OperatorRule, InterParamConstraint, InterConstraintsRuleType
 
 logger = LazyLogger()
 

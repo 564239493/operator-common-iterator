@@ -6,8 +6,8 @@ from typing import Optional, Union, List
 
 from pydantic import BaseModel
 
-from agent.generators.atk_common_utils.design_config import StandardConfig, MAX_NUMBER_OF_ELEMENTS
-from agent.generators.atk_common_utils.logger_utils_atk import Logger
+from generators.atk_common_utils.design_config import StandardConfig, MAX_NUMBER_OF_ELEMENTS
+from generators.atk_common_utils.logger_utils_atk import Logger
 
 logging = Logger()
 

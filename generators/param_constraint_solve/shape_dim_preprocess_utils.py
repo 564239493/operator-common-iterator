@@ -8,7 +8,7 @@
 import ast
 from typing import List, Dict
 
-from agent.generators.common_utils.logger_util import LazyLogger
+from generators.common_utils.logger_util import LazyLogger
 
 logger = LazyLogger()
 

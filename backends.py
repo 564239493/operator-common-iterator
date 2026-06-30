@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from abc import ABC, abstractmethod
 
@@ -57,6 +58,7 @@ class APIBackend(LLMBackend):
         model: str | None = None,
         chunk_idle_timeout: float | None = None,
         total_timeout: float | None = None,
+        stream_to_console: bool | None = None,
     ):
         settings = get_settings()
         self._settings = settings
@@ -75,8 +77,13 @@ class APIBackend(LLMBackend):
             total_timeout if total_timeout is not None
             else settings.llm_total_timeout
         )
-        # 进度日志间隔（秒）— 长响应避免每 20 chunk 打一行日志刷屏
-        self._progress_log_interval = 60.0
+        # 流式输出到 stderr（调试用）：None 表示沿用 .env 配置
+        self._stream_to_console = (
+            stream_to_console if stream_to_console is not None
+            else settings.llm_stream_console_output
+        )
+        # 进度日志间隔（秒）— 每隔 N 秒打一次 throughput，避免用户感觉卡死
+        self._progress_log_interval = settings.llm_progress_log_interval
 
     @property
     def name(self) -> str:
@@ -122,6 +129,8 @@ class APIBackend(LLMBackend):
             "APIBackend: 开始调用 LLM (model=%s, chunk_idle=%.0fs, total=%.0fs)",
             self._model, self._chunk_idle_timeout, self._total_timeout,
         )
+        if self._stream_to_console:
+            print("\n[llm-stream ↓]", file=sys.stderr, flush=True)
         t_start = time.monotonic()
 
         chunk_count = 0
@@ -153,10 +162,15 @@ class APIBackend(LLMBackend):
 
         try:
             content_parts: list[str] = []
+            chars_received = 0  # 思考 + 答案的总字节数（throughput 统计用）
             t_first_chunk: float | None = None
             t_last_chunk = t_start
             t_last_progress_log = t_start
+            t_last_heartbeat = t_start
             max_idle_gap = 0.0
+            # 阶段标记：reasoning 模型会先发 reasoning_content，再发 content
+            in_reasoning = False
+            in_content = False
             _next = self._next_with_deadline
 
             while True:
@@ -188,19 +202,65 @@ class APIBackend(LLMBackend):
                         t_first_chunk - t_start,
                     )
                 elif now - t_last_progress_log >= self._progress_log_interval:
-                    # 每隔 _progress_log_interval 秒打一次进度（默认 60s），
-                    # 避免长响应产生过多 INFO 日志
+                    # 周期性进度日志：chunks + 字节数 + throughput
+                    elapsed = now - t_start
+                    chars_per_s = chars_received / elapsed if elapsed > 0 else 0
                     logger.info(
-                        "APIBackend: 已接收 %d chunks (累计 %.2fs, 距上一个 %.2fs)",
-                        chunk_count, now - t_start, gap,
+                        "APIBackend: 已接收 %d chunks / %d chars "
+                        "(%.1fs, %.1f KB, %.0f chars/s, gap %.2fs)",
+                        chunk_count, chars_received,
+                        elapsed, chars_received / 1024,
+                        chars_per_s, gap,
                     )
                     t_last_progress_log = now
 
                 # 从 chunk 提取增量文本
                 if chunk.choices:
                     delta = chunk.choices[0].delta
-                    if delta and delta.content:
-                        content_parts.append(delta.content)
+                    if delta:
+                        # 思考内容（DeepSeek reasoning 模型特有字段，
+                        # 通过 getattr 兼容标准 openai SDK 没有该属性的情况）
+                        reasoning = getattr(delta, "reasoning_content", None)
+                        if reasoning:
+                            chars_received += len(reasoning)
+                            if self._stream_to_console:
+                                if not in_reasoning:
+                                    print("\n[think ↓] ",
+                                          file=sys.stderr, end="", flush=True)
+                                    in_reasoning = True
+                                print(reasoning, end="", flush=True,
+                                      file=sys.stderr)
+
+                        # 最终答案
+                        text = getattr(delta, "content", None)
+                        if text:
+                            content_parts.append(text)
+                            chars_received += len(text)
+                            if self._stream_to_console:
+                                if not in_content:
+                                    # 思考→答案之间换行，答案阶段打新前缀
+                                    if in_reasoning:
+                                        print(file=sys.stderr)
+                                    print("[answer ↓] ",
+                                          file=sys.stderr, end="", flush=True)
+                                    in_content = True
+                                print(text, end="", flush=True,
+                                      file=sys.stderr)
+
+                # Heartbeat：每 1s 输出一行到 stderr，确认没卡死
+                # （仅在流式打印开启时；不影响日志整洁度）
+                if self._stream_to_console and \
+                        now - t_last_heartbeat >= 1.0 and \
+                        now - t_last_chunk >= 0.5:
+                    waited = now - t_last_chunk
+                    phase = "thinking" if not in_content else "answer"
+                    print(
+                        f"\n  ♥ heartbeat | {phase} | waiting {waited:.1f}s "
+                        f"for next chunk | {chunk_count} chunks / "
+                        f"{chars_received} chars",
+                        file=sys.stderr, flush=True,
+                    )
+                    t_last_heartbeat = now
 
             # ── 循环结束 ──
             if chunk_count == 0:
@@ -215,10 +275,15 @@ class APIBackend(LLMBackend):
             content = "".join(content_parts).strip()
             elapsed = time.monotonic() - t_start
             first_latency = (t_first_chunk - t_start) if t_first_chunk else 0.0
+            if self._stream_to_console:
+                # 流式内容末尾补换行，让后续日志另起一行
+                print("\n[llm-stream ↑]", file=sys.stderr, flush=True)
             logger.info(
                 "APIBackend: LLM 流式返回完成 "
-                "(total=%.2fs, first=%.2fs, chunks=%d, max_idle=%.2fs, len=%d)",
-                elapsed, first_latency, chunk_count, max_idle_gap, len(content),
+                "(total=%.2fs, first=%.2fs, chunks=%d, max_idle=%.2fs, "
+                "thinking=%s, answer_len=%d)",
+                elapsed, first_latency, chunk_count, max_idle_gap,
+                in_reasoning, len(content),
             )
 
             if not content:

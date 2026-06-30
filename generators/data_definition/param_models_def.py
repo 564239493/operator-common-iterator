@@ -10,9 +10,9 @@ from typing import Union, List, Dict, Optional, Any
 
 from pydantic import BaseModel
 
-from agent.generators.common_utils.common_dispatcher import CommonDispatcher
-from agent.generators.data_definition.common_models import DispatcherTargetType
-from agent.generators.data_definition.constants import ParamModelConfig
+from generators.common_utils.common_dispatcher import CommonDispatcher
+from generators.data_definition.common_models import DispatcherTargetType
+from generators.data_definition.constants import ParamModelConfig
 
 
 class ParamRangeRoleRules(Enum):

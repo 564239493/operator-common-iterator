@@ -41,9 +41,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from agent.generators.atk_common_utils.case_config import CaseConfig
-from agent.generators.data_definition.param_models_def import RunPlatform
-from agent.generators.operator_handle_main import single_operator_handle
+from generators.atk_common_utils.case_config import CaseConfig
+from generators.data_definition.param_models_def import RunPlatform
+from generators.operator_handle_main import single_operator_handle
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def _ensure_formal_logger_initialized(operator_name: str = "") -> None:
         return
     log_name = f"generate_case_{key}" if key else _FALLBACK_LOG_NAME
     try:
-        from agent.generators.common_utils.logger_util import init_logger
+        from generators.common_utils.logger_util import init_logger
         init_logger(log_name=log_name, log_dir="./logs")
         _logger_initialized_operators.add(key)
     except Exception as init_err:  # pragma: no cover - 防呆

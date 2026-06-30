@@ -14,11 +14,11 @@ from typing import List, Tuple, Dict
 
 from pydantic import ValidationError
 
-from agent.generators.common_utils.common_dispatcher import CommonDispatcher
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.common_models import DispatcherTargetType
-from agent.generators.data_definition.constants import ParamModelConfig
-from agent.generators.data_definition.param_models_def import SingleShapeStrategy, ParamShapeRoleRules
+from generators.common_utils.common_dispatcher import CommonDispatcher
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.common_models import DispatcherTargetType
+from generators.data_definition.constants import ParamModelConfig
+from generators.data_definition.param_models_def import SingleShapeStrategy, ParamShapeRoleRules
 
 logger = LazyLogger()
 

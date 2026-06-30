@@ -13,11 +13,11 @@ from typing import List, Dict
 
 from pydantic import ValidationError
 
-from agent.generators.atk_common_utils.case_config import CaseConfig
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap, GlobalConfig
-from agent.generators.data_definition.param_models_def import RunPlatform
-from agent.generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
+from generators.atk_common_utils.case_config import CaseConfig
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.constants import DataMatchMap, GlobalConfig
+from generators.data_definition.param_models_def import RunPlatform
+from generators.common_model_definition import OperatorRule, ParamAttributes, ValueWithSrcText
 
 logger = LazyLogger()
 

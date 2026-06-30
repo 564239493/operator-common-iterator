@@ -1,0 +1,40 @@
+# =============================================================================
+# operator-common-iterator 依赖清单
+#
+# 本项目运行时通过 sys.path 引用同级目录 operator-agent 的源码（见
+# orchestrator.py 中的 _AGENT_SRC / _SHARED_SRC），因此 operator-agent 自身
+# 的依赖（langchain、asyncssh、numpy、torch、z3-solver 等）也需要一并安装。
+#
+# 推荐 Python ≥ 3.12（与 operator-agent/packages/agent/pyproject.toml 一致）。
+# =============================================================================
+
+# -------- 本项目核心 --------（config.py / orchestrator.py / executer/）
+pydantic>=2.0            # config.py / executer/execution_result.py
+pydantic-settings>=2.0   # config.py
+httpx>=0.27              # diag_deepseek.py（直连 DeepSeek 用）
+langchain-openai>=0.3    # diag_langchain.py / executer/cpu_derivation.py
+langgraph>=0.4           # executer/__init__.py（StateGraph 子图）
+asyncssh>=2.14           # executer/ssh_executor.py / executer/report_parser.py
+openpyxl>=3.1            # executer/report_parser.py（解析 ATK 报告 xlsx）
+
+# -------- 用例生成（generators/，源自 operator-agent）--------
+numpy>=1.26              # generators/operator_param_models/case_generate.py 等
+pyyaml>=6.0              # generators/atk_common_utils/design_config.py
+packaging>=23.0          # generators/atk_common_utils/enums.py
+typing_extensions>=4.0   # generators/atk_common_utils/design_config.py（Literal）
+
+# -------- 约束求解（generators/param_constraint_solve/）--------
+# 用例生成时对算子参数约束做 SMT 求解；如果不需要真求解可去掉
+z3-solver>=4.12
+
+# -------- Torch（generators/data_definition/constants.py + atk_common_utils/enums.py）--------
+# ⚠️ 安装包很大（~2GB），仅在真正执行 Step 2 用例生成时需要；
+#    跑纯约束提取 / 结果分析 / SSH 执行可以省略。
+# torch>=2.0
+
+# -------- 同级项目 operator-agent 的源码依赖（无需 pip，但 orchestrator.py 会通过 sys.path 加载）--------
+# 使用前请确认目录结构：
+#   d:/operator_project/
+#     ├── operator-agent/
+#     └── operator-common-iterator/    ← 本项目
+# 若安装到别处，需要相应调整 orchestrator.py 中的 _AGENT_ROOT 路径。

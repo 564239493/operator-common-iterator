@@ -26,7 +26,7 @@ _PROVIDER_DEFAULTS: dict[LLMProvider, dict[str, str]] = {
     },
     LLMProvider.DEEPSEEK: {
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-v4-pro",
     },
 }
 
@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     llm_chunk_idle_timeout: float = Field(default=60.0, ge=1.0, le=600.0)
     # 单次 LLM 调用的总超时（httpx read timeout 兜底）
     llm_total_timeout: float = Field(default=600.0, ge=10.0, le=3600.0)
+
+    # ---- 流式输出到控制台（调试用）----
+    # True 时每个 delta 会立即打印到 stderr（不阻塞 stdout 捕获）；
+    # 默认 False —— 生产环境关掉，避免长响应刷屏
+    llm_stream_console_output: bool = False
+    # 进度日志间隔（秒）— 每隔 N 秒打一次 throughput，让长响应看起来活跃
+    # 默认 3.0s（原来 60s 间隔用户感受不到进度）
+    llm_progress_log_interval: float = Field(default=3.0, ge=0.5, le=60.0)
 
     @property
     def active_api_key(self) -> SecretStr:

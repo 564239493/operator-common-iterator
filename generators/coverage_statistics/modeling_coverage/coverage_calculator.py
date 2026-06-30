@@ -19,7 +19,7 @@
 import itertools
 from typing import Dict, List
 
-from agent.generators.common_utils.logger_util import LazyLogger
+from generators.common_utils.logger_util import LazyLogger
 from .attribute_defs import OperatorAttributeDomain, ParamAttributeDomain
 from .case_parser import CaseAttributeRecord
 

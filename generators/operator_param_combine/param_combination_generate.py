@@ -9,13 +9,13 @@ import copy
 import random
 from typing import List
 
-from agent.generators.common_utils.data_handle_utils import DataHandleUtil
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
-from agent.generators.data_definition.param_models_def import OperatorParameterCombination, ParameterPropertyData, \
+from generators.common_utils.data_handle_utils import DataHandleUtil
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.constants import DataMatchMap, ParamModelConfig
+from generators.data_definition.param_models_def import OperatorParameterCombination, ParameterPropertyData, \
     ParameterShapeProperty, ParamRangeValueType
-from agent.generators.param_constraint_solve.z3_expression_solver_utils import ExpressionPreprocessor
-from agent.generators.common_model_definition import OperatorRule
+from generators.param_constraint_solve.z3_expression_solver_utils import ExpressionPreprocessor
+from generators.common_model_definition import OperatorRule
 
 logger = LazyLogger()
 

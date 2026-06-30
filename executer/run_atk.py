@@ -116,7 +116,7 @@ def _build_atk_command(
     cases_remote = _remote_cases_path(operator_name)
     executor_remote = _remote_executor_path(operator_name)
     return (
-        f"cd {_REMOTE_HOME} && "
+        f"{env_init} && "
         f"atk node --backend cpu task "
         f"-c {cases_remote} "
         f"-p {executor_remote} "
@@ -329,6 +329,7 @@ async def exec_run_atk_node(state: PipelineState) -> dict[str, Any]:
     flat = result.model_dump()
     flat["total"] = result.task_report_data.record_count
     flat["passed"] = result.task_report_data.passed
+    flat["failed"] = result.task_report_data.failed
     flat["status"] = result.status
 
     logger.info(

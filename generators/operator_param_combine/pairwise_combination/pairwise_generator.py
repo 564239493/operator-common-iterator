@@ -59,14 +59,14 @@ import random
 from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple
 
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import ParamModelConfig
-from agent.generators.operator_param_combine.pairwise_combination.attribute_domain import (
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.constants import ParamModelConfig
+from generators.operator_param_combine.pairwise_combination.attribute_domain import (
     AttributeDomain,
     ATTR_DTYPE, ATTR_FORMAT, ATTR_DIMENSIONS,
     ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_IS_OPTIONAL, ATTR_IS_OPERATOR_PARAM,
 )
-from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
+from generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
 
 logger = LazyLogger()
 

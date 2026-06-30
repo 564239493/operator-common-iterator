@@ -27,19 +27,19 @@ Public re-exports
 
 from __future__ import annotations
 
-from agent.generators.common_model_definition import (
+from generators.common_model_definition import (
     InterConstraintsRuleType,
     InterParamConstraint,
     OperatorRule,
     ParamAttributes,
     ValueWithSrcText,
 )
-from agent.generators.facade import (
+from generators.facade import (
     DEFAULT_COUNT,
     DEFAULT_SEED,
     TestCaseGenerator,
 )
-from agent.generators.operator_handle_main import (
+from generators.operator_handle_main import (
     batch_operator_handel,
     single_operator_handle,
 )

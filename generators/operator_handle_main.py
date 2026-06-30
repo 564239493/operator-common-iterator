@@ -18,13 +18,13 @@ import os.path
 import time
 from typing import List, Mapping, Union
 
-from agent.generators.common_utils.data_handle_utils import DataHandleUtil
-from agent.generators.common_utils.logger_util import LazyLogger, init_logger, DocumentLogContext
-from agent.generators.common_model_definition import OperatorRule
-from agent.generators.data_definition.constants import GlobalConfig
-from agent.generators.data_definition.param_models_def import RunPlatform
-from agent.generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
-from agent.generators.operator_param_models.batch_case_generate import OperatorCaseGenerator
+from generators.common_utils.data_handle_utils import DataHandleUtil
+from generators.common_utils.logger_util import LazyLogger, init_logger, DocumentLogContext
+from generators.common_model_definition import OperatorRule
+from generators.data_definition.constants import GlobalConfig
+from generators.data_definition.param_models_def import RunPlatform
+from generators.operator_param_combine.param_combination_generate import ParamCombinationGenerator
+from generators.operator_param_models.batch_case_generate import OperatorCaseGenerator
 from pydantic import ValidationError
 
 logger = LazyLogger()
@@ -102,7 +102,7 @@ def single_operator_handle(operator_constraint, platform=RunPlatform.ATLAS_A3_TR
     """
     # 正式生成代码依赖 ``init_logger`` 初始化文件 logger，这里做一次惰性兜底。
     try:
-        from agent.generators.common_utils.logger_util import init_logger as _init_logger, get_logger as _get_logger
+        from generators.common_utils.logger_util import init_logger as _init_logger, get_logger as _get_logger
         try:
             _get_logger()
         except RuntimeError:

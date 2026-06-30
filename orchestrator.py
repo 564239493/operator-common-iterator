@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 # -- 确保 agent.generators 可导入（用例生成依赖 operator-agent 的 generators 包）--
-_AGENT_ROOT = Path(__file__).resolve().parent.parent / "operator-project" / "operator-agent"
+_AGENT_ROOT = Path(__file__).resolve().parent.parent / "operator-agent"
 _AGENT_SRC = _AGENT_ROOT / "packages" / "agent" / "src"
 _SHARED_SRC = _AGENT_ROOT / "packages" / "shared" / "src"
 if str(_AGENT_SRC) not in sys.path:
@@ -335,7 +335,7 @@ class IterativePipeline:
         logger.info("Step 2: 用例生成")
 
         try:
-            from agent.generators.facade import TestCaseGenerator
+            from generators.facade import TestCaseGenerator
 
             gen = TestCaseGenerator(
                 json_constraints=record.constraints_json,
@@ -377,6 +377,83 @@ class IterativePipeline:
         except Exception as e:
             logger.exception("用例生成异常")
             record.generation_error = str(e)
+        else:
+            # 用例生成没有抛异常，但仍可能产出 0 条用例（典型场景：约束求解
+            # 全部失败 / dtype 不支持 / 语义角色文件缺失）。这种情况必须当作
+            # 生成失败上报，否则后续 _step_execute_cases 会把空 cases.json 当
+            # 合法输入往下走，最终得到一条假阳性"全部 0 个用例通过"。
+            if record.case_count == 0:
+                msg = (
+                    "用例生成完成但产出 0 条用例（generator 未抛异常，疑似约束求解失败 / "
+                    "dtype 不支持 / 语义角色文件缺失）。请查看 "
+                    f"{iter_dir}/cases.json 与 {iter_dir}/generate_case.log"
+                )
+                logger.error(msg)
+                record.generation_error = msg
+        finally:
+            # 无论成功 / 异常 / 0 用例，都尝试把 generator 在 logs/ 下生成的文件
+            # 归档到 iter_dir，跟 cases.json / constraints.json 摆一起。
+            # 完全在本项目内做，不依赖任何 operator-agent 改动。
+            self._archive_generator_log(record, iter_dir)
+
+    def _archive_generator_log(
+        self, record: IterationRecord, iter_dir: Path,
+    ) -> None:
+        """把本次 generator 在项目 logs/ 下生成的日志归档到 iter_dir。
+
+        generator 的 facade 默认会把日志写到 ``<project_root>/logs/generate_case_<op>.log``
+        （相对于 CWD，参见 operator-agent 的 facade / logger_util 行为）。
+        本方法不修改任何外部项目代码，只在 orchestrator 侧做一次 move。
+
+        行为：
+        * 找到对应的 generator 日志 → 移动到 ``iter_dir/generate_case.log``
+        * 找不到（mock fallback / ImportError 路径） → 静默跳过
+        * 算子名为空 → 退到 ``operator_generator.log``
+        * 移动失败（被占用等） → 警告但不影响主流程
+        """
+        project_logs_dir = Path(__file__).resolve().parent / "logs"
+        if not project_logs_dir.is_dir():
+            return
+
+        op_name = (self.operator_name
+                   or (record.constraints_json or {}).get("operator_name")
+                   or "")
+        candidates = (
+            [project_logs_dir / f"generate_case_{op_name}.log"] if op_name else []
+        ) + [project_logs_dir / "operator_generator.log"]
+        # 只考虑本次生成期间（最近 5 分钟内）被写入过的日志文件，避免把无关历史日志挪走
+        import time as _time
+        now = _time.time()
+        recent_window = 5 * 60  # 5 分钟
+
+        moved = False
+        for src in candidates:
+            if not src.is_file():
+                continue
+            try:
+                mtime = src.stat().st_mtime
+            except OSError:
+                continue
+            if (now - mtime) > recent_window:
+                # 太旧，不是本次生成的
+                continue
+            dst = iter_dir / "generate_case.log"
+            try:
+                shutil.move(str(src), str(dst))
+                logger.info("generator 日志已归档: %s -> %s", src, dst)
+                moved = True
+                break  # 一个算子只搬一个文件
+            except Exception as e:
+                logger.warning(
+                    "归档 generator 日志失败 (%s -> %s): %s",
+                    src, dst, e,
+                )
+        # 没找到也不报错：mock 模式 / 没装 generator 时本来就不会有日志
+        if not moved:
+            logger.debug(
+                "_archive_generator_log: 未找到本次 generator 日志（op=%s, 目录=%s）",
+                op_name or "<unknown>", project_logs_dir,
+            )
 
     def _step_execute_cases(self, record: IterationRecord, iter_dir: Path):
         """用例执行 — 真实执行或 Mock。"""
@@ -557,10 +634,25 @@ class IterativePipeline:
             return
 
         # ── 成功：映射字段 ──
+        # 真实数据源在 task_report_data（report_records 的 run_result 已被
+        # report_parser._truthy_pass 归一化大小写，passed/failed 也是据此统计的）。
+        # 顶层 status 仅代表 atk 命令退出码，不能直接当作"全部用例通过"。
         record.execution_result = exec_result
-        record.execution_status = exec_result.get("status", "failed")
-        record.passed_count = int(exec_result.get("passed", 0) or 0)
-        record.failed_count = int(exec_result.get("failed", 0) or 0)
+        trd = exec_result.get("task_report_data") or {}
+        trd_records = trd.get("report_records") or []
+        if trd_records:
+            trd_passed = int(trd.get("passed", 0) or 0)
+            trd_failed = int(trd.get("failed", 0) or 0)
+            record.passed_count = trd_passed
+            record.failed_count = trd_failed
+            record.execution_status = (
+                "success" if trd_failed == 0 and trd_passed > 0 else "failed"
+            )
+        else:
+            # 兜底：task_report_data 为空时（mock / 旧数据）才回退到顶层字段
+            record.passed_count = int(exec_result.get("passed", 0) or 0)
+            record.failed_count = int(exec_result.get("failed", 0) or 0)
+            record.execution_status = exec_result.get("status", "failed")
 
         # ── 写 iter_dir/execution_result.json（_step_analyze 依赖此文件） ──
         (iter_dir / "execution_result.json").write_text(

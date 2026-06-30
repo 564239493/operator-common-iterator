@@ -140,8 +140,8 @@ if __name__ == "__main__":
     except ValueError as e:
         print(f"异常（方法标识不存在）：{e}")
 """
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.common_models import DispatcherTargetType
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.common_models import DispatcherTargetType
 
 logger = LazyLogger()
 

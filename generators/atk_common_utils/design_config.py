@@ -8,7 +8,7 @@ from typing_extensions import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator, PrivateAttr
 
-from agent.generators.atk_common_utils.enums import SingBenchmarkType
+from generators.atk_common_utils.enums import SingBenchmarkType
 
 DEFAULT_TYPES = ["tensor", "tensors", "tensor_tuple",
                  "scalar", "scalars", "scalar_tuple",

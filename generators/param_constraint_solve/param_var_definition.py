@@ -12,9 +12,9 @@ import random
 import z3
 from z3 import FPSort
 
-from agent.generators.common_utils.data_handle_utils import DataHandleUtil
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap
+from generators.common_utils.data_handle_utils import DataHandleUtil
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.constants import DataMatchMap
 
 logger = LazyLogger()
 

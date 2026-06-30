@@ -3,20 +3,20 @@ from __future__ import annotations
 import random
 from typing import Any, Dict, List
 
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.constants import DataMatchMap, ParamModelConfig
-from agent.generators.data_definition.param_models_def import (
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.constants import DataMatchMap, ParamModelConfig
+from generators.data_definition.param_models_def import (
     OperatorParameterCombination,
     ParameterPropertyData,
     ParameterShapeProperty,
 )
-from agent.generators.operator_param_combine.pairwise_combination.attribute_domain import (
+from generators.operator_param_combine.pairwise_combination.attribute_domain import (
     AttributeDomain, ATTR_DTYPE, ATTR_FORMAT, ATTR_DIMENSIONS,
     ATTR_RANGE_VALUE, ATTR_ARRAY_LENGTH, ATTR_IS_OPTIONAL, ATTR_IS_OPERATOR_PARAM,
 )
-from agent.generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
-from agent.generators.operator_param_combine.pairwise_combination.pairwise_generator import PairwiseCombinationGenerator
-from agent.generators.common_model_definition import OperatorRule
+from generators.operator_param_combine.pairwise_combination.constraint_filter import ConstraintProcessor
+from generators.operator_param_combine.pairwise_combination.pairwise_generator import PairwiseCombinationGenerator
+from generators.common_model_definition import OperatorRule
 
 logger = LazyLogger()
 

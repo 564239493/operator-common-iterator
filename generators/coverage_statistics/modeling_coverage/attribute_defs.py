@@ -15,7 +15,7 @@ import json
 import os
 from typing import Dict, List, Any, Optional
 
-from agent.generators.common_utils.logger_util import LazyLogger
+from generators.common_utils.logger_util import LazyLogger
 
 logger = LazyLogger()
 

@@ -12,13 +12,13 @@ from typing import List, Dict, Optional
 
 import torch
 
-from agent.generators.atk_common_utils.case_config import CaseConfig
-from agent.generators.common_utils.common_dispatcher import CommonDispatcher
-from agent.generators.common_utils.logger_util import LazyLogger
-from agent.generators.data_definition.common_models import DispatcherTargetType
-from agent.generators.data_definition.param_models_def import ParameterPropertyData, CaseInputRangeModel
-from agent.generators.operator_param_models.case_generate import CaseGenerate
-from agent.generators.common_model_definition import InterParamConstraint, OperatorRule, InterConstraintsRuleType
+from generators.atk_common_utils.case_config import CaseConfig
+from generators.common_utils.common_dispatcher import CommonDispatcher
+from generators.common_utils.logger_util import LazyLogger
+from generators.data_definition.common_models import DispatcherTargetType
+from generators.data_definition.param_models_def import ParameterPropertyData, CaseInputRangeModel
+from generators.operator_param_models.case_generate import CaseGenerate
+from generators.common_model_definition import InterParamConstraint, OperatorRule, InterConstraintsRuleType
 
 logger = LazyLogger()
 

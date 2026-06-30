@@ -7,8 +7,8 @@
 """
 from typing import Dict
 
-from agent.generators.common_utils.logger_util import get_logger
-from agent.generators.data_definition.constants import ParamModelConfig, DataMatchMap
+from generators.common_utils.logger_util import get_logger
+from generators.data_definition.constants import ParamModelConfig, DataMatchMap
 
 
 class ParamDtypeModel:
